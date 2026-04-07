@@ -15,12 +15,14 @@ function currentRuntime(): StatsRuntime {
   return (globalThis as { __statswhatshesaid__?: StatsRuntime }).__statswhatshesaid__!
 }
 
+const TOKEN = 'a-long-enough-token-for-this-test-xxxxxxx'
+
 describe('createMiddleware', () => {
   let tmpDir: string
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'statswhatshesaid-mw-'))
-    process.env.STATS_TOKEN = 'secret'
+    process.env.STATS_TOKEN = TOKEN
     process.env.STATS_SNAPSHOT_PATH = join(tmpDir, 'stats.json')
     ;(globalThis as { __statswhatshesaid__?: unknown }).__statswhatshesaid__ = undefined
   })
@@ -71,7 +73,7 @@ describe('createMiddleware', () => {
 
   it('short-circuits to the stats endpoint with a correct token', async () => {
     const mw = createMiddleware()
-    const res = await mw(makeReq('/stats?t=secret'))
+    const res = await mw(makeReq(`/stats?t=${TOKEN}`))
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toBe('no-store')
     const body = (await res.json()) as { today: { uniqueVisitors: number } }
@@ -104,7 +106,7 @@ describe('createMiddleware', () => {
 
     const mw2 = createMiddleware()
     // Just initializing should restore the snapshot.
-    await mw2(makeReq('/stats?t=secret')) // lazy init + read
+    await mw2(makeReq(`/stats?t=${TOKEN}`)) // lazy init + read
     expect(currentRuntime().store.estimateToday()).toBe(2)
 
     // The original visitors should still be considered seen.

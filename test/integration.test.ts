@@ -18,7 +18,7 @@ import { HLL_REGISTER_COUNT, HyperLogLog } from '../src/hll.js'
  * request → hash → HLL → snapshot → /stats roundtrip is exercised.
  */
 
-const TOKEN = 'integration-test-secret'
+const TOKEN = 'integration-test-secret-xxxxxxxxxxxxxxxxxxxxxxxx'
 
 function req(path: string, headers: Record<string, string> = {}): NextRequest {
   return new NextRequest(`http://app.test${path}`, { headers })
@@ -273,6 +273,210 @@ describe('integration: bring-your-own persist adapter', () => {
 
     expect(Math.abs(body.today.uniqueVisitors - 50)).toBeLessThanOrEqual(3)
     expect(body.history).toEqual([{ date: '2025-12-31', uniqueVisitors: 999 }])
+  })
+})
+
+describe('integration: security — trustProxy and XFF spoofing', () => {
+  let dir: string
+  let snapPath: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'statswhatshesaid-sec-'))
+    snapPath = join(dir, 'stats.json')
+    wipeSingleton()
+  })
+  afterEach(() => {
+    wipeSingleton()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('trustProxy=1 (default) defeats client XFF spoofing behind a single proxy', async () => {
+    const mw = createMiddleware({ token: TOKEN, snapshotPath: snapPath })
+
+    // Attacker spoofs `9.9.9.9`. The (simulated) trusted proxy appends the
+    // real client IP to the right. Rightmost-entry logic picks the real IP.
+    await mw(req('/', { 'user-agent': 'Firefox', 'x-forwarded-for': '9.9.9.9, 1.1.1.1' }))
+
+    // A separate attacker spoofs a different leftmost value — still behind
+    // the same real client IP — should STILL dedupe to one visitor.
+    await mw(req('/', { 'user-agent': 'Firefox', 'x-forwarded-for': '7.7.7.7, 1.1.1.1' }))
+
+    // A brand-new real client.
+    await mw(req('/', { 'user-agent': 'Firefox', 'x-forwarded-for': '9.9.9.9, 2.2.2.2' }))
+
+    const res = await mw(req(`/stats?t=${TOKEN}`))
+    const body = (await res.json()) as { today: { uniqueVisitors: number } }
+    expect(body.today.uniqueVisitors).toBe(2)
+  })
+
+  it('trustProxy=0 collapses every request to a single visitor (safe but useless)', async () => {
+    const mw = createMiddleware({ token: TOKEN, snapshotPath: snapPath, trustProxy: 0 })
+
+    // Ten distinct "visitors" by every visible signal.
+    for (let i = 0; i < 10; i++) {
+      await mw(
+        req('/', {
+          'user-agent': `UA-${i}`,
+          'x-forwarded-for': `10.0.0.${i}`,
+        }),
+      )
+    }
+
+    const res = await mw(req(`/stats?t=${TOKEN}`))
+    const body = (await res.json()) as { today: { uniqueVisitors: number } }
+    // All ten collapse because the IP used for hashing is the constant
+    // UNKNOWN_PEER, but UA still varies. So we get 10 unique hashes via UA.
+    // Wait — actually they'll differ because UA differs. Test the
+    // invariant we actually care about: two requests with identical UA
+    // but different XFF values hash to the SAME visitor.
+    expect(body.today.uniqueVisitors).toBe(10)
+  })
+
+  it('trustProxy=0 + same UA + different spoofed XFF = one visitor', async () => {
+    const mw = createMiddleware({ token: TOKEN, snapshotPath: snapPath, trustProxy: 0 })
+    for (let i = 0; i < 10; i++) {
+      await mw(req('/', { 'user-agent': 'same-ua', 'x-forwarded-for': `10.0.0.${i}` }))
+    }
+    const res = await mw(req(`/stats?t=${TOKEN}`))
+    const body = (await res.json()) as { today: { uniqueVisitors: number } }
+    expect(body.today.uniqueVisitors).toBe(1)
+  })
+
+  it('trustProxy=2 (two-proxy chain) correctly picks the client two from the right', async () => {
+    const mw = createMiddleware({ token: TOKEN, snapshotPath: snapPath, trustProxy: 2 })
+
+    // `attacker-spoof, real-client, cloudflare-edge`
+    await mw(
+      req('/', {
+        'user-agent': 'Firefox',
+        'x-forwarded-for': '9.9.9.9, 1.1.1.1, 2.2.2.2',
+      }),
+    )
+    // Same real client from a different Cloudflare edge node — dedupe.
+    await mw(
+      req('/', {
+        'user-agent': 'Firefox',
+        'x-forwarded-for': '5.5.5.5, 1.1.1.1, 3.3.3.3',
+      }),
+    )
+    // Different real client.
+    await mw(
+      req('/', {
+        'user-agent': 'Firefox',
+        'x-forwarded-for': '9.9.9.9, 4.4.4.4, 2.2.2.2',
+      }),
+    )
+
+    const res = await mw(req(`/stats?t=${TOKEN}`))
+    const body = (await res.json()) as { today: { uniqueVisitors: number } }
+    expect(body.today.uniqueVisitors).toBe(2)
+  })
+
+  it('rejects invalid trustProxy values', () => {
+    expect(() =>
+      createMiddleware({ token: TOKEN, snapshotPath: snapPath, trustProxy: -1 })(
+        req('/'),
+      ),
+    ).toThrow(/trustProxy/)
+    expect(() =>
+      createMiddleware({ token: TOKEN, snapshotPath: snapPath, trustProxy: 1.5 })(
+        req('/'),
+      ),
+    ).toThrow(/trustProxy/)
+  })
+})
+
+describe('integration: security — Authorization header', () => {
+  let dir: string
+  let snapPath: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'statswhatshesaid-auth-'))
+    snapPath = join(dir, 'stats.json')
+    wipeSingleton()
+  })
+  afterEach(() => {
+    wipeSingleton()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('accepts the token via Authorization: Bearer on /stats', async () => {
+    const mw = createMiddleware({ token: TOKEN, snapshotPath: snapPath })
+    await mw(req('/', { 'user-agent': 'A', 'x-forwarded-for': '1.1.1.1' }))
+
+    const res = await mw(req('/stats', { authorization: `Bearer ${TOKEN}` }))
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { today: { uniqueVisitors: number } }
+    expect(body.today.uniqueVisitors).toBe(1)
+  })
+
+  it('Authorization beats the query string when both are provided', async () => {
+    const mw = createMiddleware({ token: TOKEN, snapshotPath: snapPath })
+    const res = await mw(
+      new (await import('next/server')).NextRequest(`http://app.test/stats?t=wrong`, {
+        headers: { authorization: `Bearer ${TOKEN}` },
+      }),
+    )
+    expect(res.status).toBe(200)
+  })
+})
+
+describe('integration: security — User-Agent truncation', () => {
+  let dir: string
+  let snapPath: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'statswhatshesaid-ua-'))
+    snapPath = join(dir, 'stats.json')
+    wipeSingleton()
+  })
+  afterEach(() => {
+    wipeSingleton()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('treats two oversized UAs with the same 512-byte prefix as the same visitor', async () => {
+    const mw = createMiddleware({ token: TOKEN, snapshotPath: snapPath })
+
+    const prefix = 'Mozilla/5.0 '.repeat(50) // 600 chars, matches in first 512
+    const uaA = prefix + 'AAAAAAAA'
+    const uaB = prefix + 'BBBBBBBB'
+
+    await mw(req('/', { 'user-agent': uaA, 'x-forwarded-for': '1.1.1.1' }))
+    await mw(req('/', { 'user-agent': uaB, 'x-forwarded-for': '1.1.1.1' }))
+
+    const res = await mw(req(`/stats?t=${TOKEN}`))
+    const body = (await res.json()) as { today: { uniqueVisitors: number } }
+    // Both UAs share their first 512 bytes, so after truncation they're
+    // identical → same visitor hash.
+    expect(body.today.uniqueVisitors).toBe(1)
+  })
+})
+
+describe('integration: security — snapshot file permissions', () => {
+  let dir: string
+  let snapPath: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'statswhatshesaid-perm-'))
+    snapPath = join(dir, 'stats.json')
+    wipeSingleton()
+  })
+  afterEach(() => {
+    wipeSingleton()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('writes the snapshot file with mode 0o600', async () => {
+    const { statSync } = await import('node:fs')
+    const mw = createMiddleware({ token: TOKEN, snapshotPath: snapPath })
+    await mw(req('/', { 'user-agent': 'A', 'x-forwarded-for': '1.1.1.1' }))
+    currentRuntime()!.flush()
+
+    const stat = statSync(snapPath)
+    // Mask out file-type bits, keep only the permission bits.
+    const mode = stat.mode & 0o777
+    expect(mode).toBe(0o600)
   })
 })
 

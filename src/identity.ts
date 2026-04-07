@@ -14,15 +14,50 @@ export function generateSalt(): Buffer {
   return randomBytes(32)
 }
 
-export function extractIp(headers: Headers, fallbackIp?: string): string {
+/** Peer identifier used when no trusted IP is available. */
+export const UNKNOWN_PEER = '0.0.0.0'
+
+/**
+ * Resolve the client IP from the X-Forwarded-For chain, walking from the
+ * RIGHT (server side) of the chain inward, skipping `trustProxy - 1` trusted
+ * proxy hops. Returns the first "untrusted" entry as the client IP.
+ *
+ * This is the only safe way to consume XFF: the leftmost entry in the chain
+ * is whatever the client sent originally, which is attacker-controlled
+ * unless every proxy in front explicitly strips incoming XFF headers.
+ *
+ * Semantics:
+ *   - `trustProxy === 0` — never read forwarding headers. All requests
+ *     collapse to a single constant peer. Safest but breaks visitor
+ *     counting when the process is behind any kind of proxy.
+ *   - `trustProxy === N` — pick the Nth entry from the RIGHT of the XFF
+ *     chain (1-indexed). If the chain is shorter than N, fall back to the
+ *     constant peer (we can't safely identify the client).
+ *
+ * Examples with `trustProxy = 1` (default, single trusted proxy in front):
+ *   XFF: "1.1.1.1"            →  "1.1.1.1"      (genuine)
+ *   XFF: "9.9.9.9, 1.1.1.1"   →  "1.1.1.1"      (attacker forged 9.9.9.9)
+ *   XFF: (absent)              →  "0.0.0.0"      (can't identify)
+ *
+ * With `trustProxy = 2` (e.g. Cloudflare → nginx → app):
+ *   XFF: "1.1.1.1, 2.2.2.2"            →  "1.1.1.1"
+ *   XFF: "9.9.9.9, 1.1.1.1, 2.2.2.2"   →  "1.1.1.1"
+ */
+export function extractIp(headers: Headers, trustProxy: number): string {
+  if (trustProxy < 1) return UNKNOWN_PEER
+
   const xff = headers.get('x-forwarded-for')
-  if (xff) {
-    const first = xff.split(',')[0]
-    if (first && first.trim()) return first.trim()
-  }
-  const real = headers.get('x-real-ip')
-  if (real && real.trim()) return real.trim()
-  return fallbackIp ?? '0.0.0.0'
+  if (!xff) return UNKNOWN_PEER
+
+  const entries = xff
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+
+  if (entries.length < trustProxy) return UNKNOWN_PEER
+
+  // Nth-from-right, 1-indexed. trustProxy=1 → entries[length-1], etc.
+  return entries[entries.length - trustProxy]!
 }
 
 /**

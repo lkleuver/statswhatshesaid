@@ -71,8 +71,21 @@ export function getOrInitRuntime(config: ResolvedConfig): StatsRuntime {
     shuttingDown = true
     if (flushTimer) clearInterval(flushTimer)
     if (cancelMidnight) cancelMidnight()
+    // Remove our process signal handlers so they don't leak across
+    // repeated init/shutdown cycles (e.g. test suites, dev-mode HMR).
+    process.removeListener('SIGTERM', shutdown)
+    process.removeListener('SIGINT', shutdown)
+    process.removeListener('beforeExit', shutdown)
     try {
       flush()
+    } catch {
+      /* swallow */
+    }
+    try {
+      if (config.persist == null) {
+        // Nothing to close for the default file adapter, but a user
+        // adapter might want a close hook later. For now just a no-op.
+      }
     } catch {
       /* swallow */
     }
@@ -85,9 +98,11 @@ export function getOrInitRuntime(config: ResolvedConfig): StatsRuntime {
   flushTimer.unref?.()
   cancelMidnight = scheduleMidnightTimer(tick)
 
-  process.once('SIGTERM', shutdown)
-  process.once('SIGINT', shutdown)
-  process.once('beforeExit', shutdown)
+  // `.once` would auto-remove on fire, but we also need to remove them
+  // during an explicit `shutdown()` (tests, HMR) — see shutdown() above.
+  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', shutdown)
+  process.on('beforeExit', shutdown)
 
   const runtime: StatsRuntime = { config, store, persist, flush, shutdown }
   globalThis.__statswhatshesaid__ = runtime

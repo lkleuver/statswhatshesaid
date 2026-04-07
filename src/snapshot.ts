@@ -73,7 +73,11 @@ export class FileSnapshotAdapter implements PersistAdapter {
 
   save(snap: SnapshotV1): void {
     const tmp = `${this.path}.tmp`
-    writeFileSync(tmp, JSON.stringify(snap))
+    // mode 0o600 so the snapshot (which contains the current day's salt
+    // — a secret that would make hashes linkable back to their source
+    // tuples) is not world-readable. The file is rename-replaced on
+    // every flush, so the mode needs to be set on each write.
+    writeFileSync(tmp, JSON.stringify(snap), { mode: 0o600 })
     renameSync(tmp, this.path)
   }
 }

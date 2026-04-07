@@ -12,7 +12,7 @@ const nullPersist: PersistAdapter = {
   save: () => {},
 }
 
-function makeRuntime(token = 'secret'): StatsRuntime {
+function makeRuntime(token = 'a-long-enough-token-for-this-test-xxxxxxx'): StatsRuntime {
   const config: ResolvedConfig = {
     token,
     snapshotPath: '(unused)',
@@ -22,6 +22,7 @@ function makeRuntime(token = 'secret'): StatsRuntime {
     historyDays: 90,
     maxHistoryDays: 365,
     filterBots: true,
+    trustProxy: 1,
   }
   return {
     config,
@@ -32,34 +33,50 @@ function makeRuntime(token = 'secret'): StatsRuntime {
   }
 }
 
-function reqWithToken(token: string | null): NextRequest {
+const TOKEN = 'a-long-enough-token-for-this-test-xxxxxxx'
+
+function reqWithQuery(token: string | null): NextRequest {
   const url = token === null ? 'http://x.test/stats' : `http://x.test/stats?t=${token}`
   return new NextRequest(url)
+}
+
+function reqWithAuth(header: string): NextRequest {
+  return new NextRequest('http://x.test/stats', {
+    headers: { authorization: header },
+  })
 }
 
 describe('handleStatsEndpoint', () => {
   let runtime: StatsRuntime
   beforeEach(() => {
-    runtime = makeRuntime('secret')
+    runtime = makeRuntime(TOKEN)
   })
 
   it('returns 401 when no token is provided', () => {
-    expect(handleStatsEndpoint(reqWithToken(null), runtime).status).toBe(401)
+    expect(handleStatsEndpoint(reqWithQuery(null), runtime).status).toBe(401)
   })
 
-  it('returns 401 for the wrong token', () => {
-    expect(handleStatsEndpoint(reqWithToken('nope'), runtime).status).toBe(401)
+  it('returns 401 for the wrong token (query)', () => {
+    expect(handleStatsEndpoint(reqWithQuery('nope'), runtime).status).toBe(401)
   })
 
-  it('returns 401 for a wrong-length token (timing-safe path)', () => {
-    expect(handleStatsEndpoint(reqWithToken('a'), runtime).status).toBe(401)
+  it('returns 401 for a wrong-length token', () => {
+    expect(handleStatsEndpoint(reqWithQuery('a'), runtime).status).toBe(401)
   })
 
-  it('returns 200 with the expected JSON shape for a correct token', async () => {
+  it('returns 401 for a bogus Authorization header', () => {
+    expect(handleStatsEndpoint(reqWithAuth('Bearer nope'), runtime).status).toBe(401)
+  })
+
+  it('returns 401 for an Authorization header without the Bearer prefix', () => {
+    expect(handleStatsEndpoint(reqWithAuth(TOKEN), runtime).status).toBe(401)
+  })
+
+  it('returns 200 with the expected JSON shape for a correct token (query)', async () => {
     runtime.store.track('1.1.1.1', 'ua-a')
     runtime.store.track('2.2.2.2', 'ua-b')
 
-    const res = handleStatsEndpoint(reqWithToken('secret'), runtime)
+    const res = handleStatsEndpoint(reqWithQuery(TOKEN), runtime)
     expect(res.status).toBe(200)
     expect(res.headers.get('cache-control')).toBe('no-store')
 
@@ -72,5 +89,23 @@ describe('handleStatsEndpoint', () => {
     expect(body.today.date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(Array.isArray(body.history)).toBe(true)
     expect(typeof body.generatedAt).toBe('string')
+  })
+
+  it('accepts the token via Authorization: Bearer', () => {
+    const res = handleStatsEndpoint(reqWithAuth(`Bearer ${TOKEN}`), runtime)
+    expect(res.status).toBe(200)
+  })
+
+  it('accepts the Bearer prefix case-insensitively', () => {
+    const res = handleStatsEndpoint(reqWithAuth(`bearer ${TOKEN}`), runtime)
+    expect(res.status).toBe(200)
+  })
+
+  it('prefers the Authorization header over the query string', () => {
+    // Authorization is correct, query is wrong. Should accept the header.
+    const req = new NextRequest(`http://x.test/stats?t=wrong`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    })
+    expect(handleStatsEndpoint(req, runtime).status).toBe(200)
   })
 })

@@ -21,6 +21,24 @@ export interface StatsOptions {
   maxHistoryDays?: number
   /** Drop common bot User-Agents instead of counting them. Default true. */
   filterBots?: boolean
+  /**
+   * How many reverse-proxy hops to trust at the right end of the
+   * `X-Forwarded-For` chain. Default: `1` (one reverse proxy in front of
+   * this process, e.g. nginx / Traefik / Caddy / Cloud provider LB).
+   *
+   * - `0` — ignore all forwarding headers. Every request hashes to the
+   *   same constant peer, collapsing unique visitor counts. Use this only
+   *   if the process is directly exposed to untrusted clients AND you'd
+   *   rather under-count than be spoofable.
+   * - `1` — take the rightmost entry of `X-Forwarded-For` (the IP the last
+   *   trusted proxy observed as its peer). Safe when exactly one trusted
+   *   proxy is in front of this process.
+   * - `N > 1` — take the Nth entry from the right. Use when multiple
+   *   trusted proxies chain (e.g. Cloudflare → nginx → app = 2).
+   *
+   * See the Security section of the README for configuration examples.
+   */
+  trustProxy?: number
 }
 
 export interface ResolvedConfig {
@@ -32,6 +50,7 @@ export interface ResolvedConfig {
   historyDays: number
   maxHistoryDays: number
   filterBots: boolean
+  trustProxy: number
 }
 
 export interface DailyCount {

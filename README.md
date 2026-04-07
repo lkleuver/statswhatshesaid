@@ -174,14 +174,125 @@ Configure via env vars (preferred) or by passing options to `stats.middleware({.
 | `historyDays` | — | `90` (returned from `/stats`) |
 | `maxHistoryDays` | — | `365` (kept in snapshot) |
 | `filterBots` | — | `true` |
+| `trustProxy` | `STATS_TRUST_PROXY` | `1` (see [Security](#security) below) |
 
 ```ts
 export default stats.middleware({
   endpointPath: '/_internal/stats',
   flushIntervalMs: 5 * 60 * 1000,
   historyDays: 30,
+  trustProxy: 1,
 })
 ```
+
+## Security
+
+This is a minimal library, but it runs inside your app's request path and writes to your filesystem, so its defaults matter. Read this section before deploying.
+
+### Threat model
+
+- **In scope:** preventing trivial forging of visitor counts, protecting the `/stats` endpoint from unauthorized reads, keeping the process alive under abuse, making visitor hashes cross-day unlinkable.
+- **Out of scope:** preventing a determined attacker with unlimited resources from skewing the numbers. statswhatshesaid is for day-one visibility on small, self-hosted apps. Once your traffic is big enough that someone would bother flooding your stats, you should be on Plausible / Umami / PostHog anyway.
+
+### 1. `trustProxy` — who decides the client IP?
+
+Unique-visitor dedup hashes the client IP alongside the User-Agent. If the attacker controls the IP you hash with, they control the count.
+
+**The problem:** `X-Forwarded-For` is a list of IPs separated by commas. Each reverse proxy in the chain **appends** the IP of *its own peer* (the thing that spoke TCP to it). The *leftmost* entry is whatever the original client claimed — i.e. attacker-controlled. The *rightmost N entries* are what trusted proxies added, so they're authentic.
+
+To pick the real client IP safely you must **walk the chain from the right, skipping one entry per trusted proxy**.
+
+**Configuration:**
+
+- `trustProxy: 0` — Never read forwarding headers. Every request hashes to a single constant peer. `uniqueVisitors` will under-count dramatically (ideally it collapses to 1), but **nothing an attacker sends can forge it**. Use this only if (a) your process is directly exposed to untrusted clients, or (b) you're OK with a "did anybody visit today?" binary signal.
+
+- `trustProxy: 1` **(default)** — One trusted reverse proxy sits in front of this Node process. The library takes the **rightmost** entry of `X-Forwarded-For`. This is correct for the single most common self-hosted shape: `client → nginx → next`, or `client → Caddy → next`, or `client → Traefik → next`.
+
+- `trustProxy: 2` — Two trusted hops. The library takes the **second-from-right** entry of `X-Forwarded-For`. Use this for setups like `client → Cloudflare → nginx → next` where Cloudflare is ALSO adding to XFF.
+
+- `trustProxy: N` — Generalizes to N trusted hops.
+
+**nginx recipe (trustProxy = 1):**
+
+```nginx
+location / {
+  proxy_pass http://127.0.0.1:3000;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header Host $host;
+}
+```
+
+`$proxy_add_x_forwarded_for` appends the client's socket IP to whatever XFF the client sent. With `trustProxy: 1`, statswhatshesaid ignores whatever the client sent and takes the rightmost entry (which is what nginx appended). The client's spoofed values sit uselessly to the left.
+
+**Caddy recipe (trustProxy = 1):**
+
+```caddyfile
+example.com {
+  reverse_proxy 127.0.0.1:3000
+}
+```
+
+Caddy automatically appends the client IP to `X-Forwarded-For` by default.
+
+**Cloudflare + nginx recipe (trustProxy = 2):**
+
+```nginx
+# nginx behind Cloudflare
+location / {
+  proxy_pass http://127.0.0.1:3000;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+}
+```
+
+With `trustProxy: 2`, the second-from-right entry is the real client: `attacker-spoof, real-client, cloudflare-edge`.
+
+**Direct-exposed (no proxy) warning:** If you're running `next start` straight on `0.0.0.0:3000` with no proxy, **any header you see is attacker-controlled**. Set `trustProxy: 0` and accept that visitor dedup won't work, OR put any reverse proxy in front.
+
+### 2. Token strength and rate limiting
+
+`/stats` is protected by a single static token. A short token is brute-forceable if an attacker hammers the endpoint.
+
+- statswhatshesaid **warns** at startup if your token is shorter than 32 characters. It does not reject — you might deliberately pick a memorable token for ad-hoc browser access from anywhere.
+- A safer choice: `openssl rand -hex 32` → a 64-char hex string.
+- The library does **not** rate-limit `/stats`. That's your CDN / reverse-proxy / application middleware's job. For nginx: [`limit_req`](https://nginx.org/en/docs/http/ngx_http_limit_req_module.html). For Cloudflare: [rate limiting rules](https://developers.cloudflare.com/waf/rate-limiting-rules/). For Next.js middleware chains: [`@upstash/ratelimit`](https://github.com/upstash/ratelimit-js).
+
+### 3. Passing the token: `Authorization` header vs query string
+
+You can pass the token two ways:
+
+| Method | Use when |
+| --- | --- |
+| `Authorization: Bearer <token>` header | **Production** — doesn't leak to access logs, browser history, or Referer |
+| `?t=<token>` query string | Ad-hoc browser checks where typing a header is annoying |
+
+Both are accepted. If both are present, the `Authorization` header wins. Example production check:
+
+```bash
+curl -H "Authorization: Bearer $STATS_TOKEN" https://myapp.com/stats
+```
+
+The query string is convenient but ends up in **nginx/CDN access logs, browser history, and Referer headers**. Don't link to `/stats?t=...` from any page.
+
+### 4. Count inflation by flooding
+
+An attacker who can send arbitrary (IP, User-Agent) pairs — even behind a correctly configured `trustProxy` — can insert arbitrarily many distinct "visitors" into the HLL sketch. Memory doesn't blow up (HLL is fixed 16 KB/day), but the reported `uniqueVisitors` becomes meaningless during the attack. The library cannot prevent this at the middleware layer. **Defense:** rate-limit tracked routes at the same layer that protects the rest of your app. Don't treat the number as authoritative during a suspected abuse event.
+
+### 5. Snapshot file permissions and contents
+
+- The snapshot file is written with mode `0o600` (owner read/write only). It contains the current day's salt, which would make visitor hashes linkable back to their `(ip, ua)` tuples if disclosed alongside an independent request log.
+- Write is atomic via `.tmp` + `rename`. A crash mid-write leaves the previous snapshot intact.
+- The snapshot file contains **no personal data** — just the HLL registers, the salt, and per-day visitor counts. No IPs or User-Agents are stored.
+
+### 6. User-Agent length cap
+
+Incoming User-Agent headers are truncated to **512 bytes** before hashing and bot-filter checks. Node already caps total header size at ~16 KB, but this bounds per-request CPU regardless.
+
+### 7. Privacy properties
+
+- **Cookieless.** The library never sets or reads cookies.
+- **No personal data persisted.** Hashes go into the HLL (which discards them) and are never written to disk.
+- **Cross-day unlinkability.** The salt rotates at every UTC midnight. Yesterday's hash of `(ip, ua)` is unrelated to today's hash of the same tuple.
+- **Mid-day restart caveat.** If the process restarts within the same UTC day, the restored salt (from the snapshot file) is the same, so the same visitor returning after the restart doesn't get double-counted. This means the salt IS on disk for the current day. Rotate `STATS_TOKEN` and delete the snapshot file if you think the file was exposed.
 
 ## Where it works
 

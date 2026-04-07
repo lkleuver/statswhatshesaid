@@ -39,10 +39,20 @@ export function trackRequest(req: NextRequest, options: StatsOptions = {}): void
   trackRequestInternal(req, runtime)
 }
 
+/**
+ * Max number of User-Agent bytes we feed into the visitor hash. Node's HTTP
+ * parser already caps header size at ~16 KB, but we truncate defensively so
+ * an oversized UA can't cause per-request CPU blow-up.
+ */
+const MAX_UA_LENGTH = 512
+
 function trackRequestInternal(req: NextRequest, runtime: StatsRuntime): void {
-  const ua = req.headers.get('user-agent') ?? ''
+  const rawUa = req.headers.get('user-agent') ?? ''
+  // Truncate BEFORE the bot filter so a 10 KB UA with "bot" on the far right
+  // is still filtered — the regex only needs to see the prefix.
+  const ua = rawUa.length > MAX_UA_LENGTH ? rawUa.slice(0, MAX_UA_LENGTH) : rawUa
   if (runtime.config.filterBots && isBot(ua)) return
 
-  const ip = extractIp(req.headers, (req as { ip?: string }).ip)
+  const ip = extractIp(req.headers, runtime.config.trustProxy)
   runtime.store.track(ip, ua)
 }
