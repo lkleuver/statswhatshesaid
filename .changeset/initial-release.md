@@ -1,8 +1,8 @@
 ---
-"@statswhatshesaid/next": minor
+"statswhatshesaid": minor
 ---
 
-Initial release of `@statswhatshesaid/next` — a super minimal drop-in unique-visitors-per-day stats library for self-hosted Next.js.
+Initial release of `statswhatshesaid` — a super minimal drop-in unique-visitors-per-day stats library for self-hosted Next.js.
 
 **Features:**
 

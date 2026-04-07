@@ -13,7 +13,7 @@ A super minimal drop-in stats library for **self-hosted Next.js**. One metric, o
 ## Install
 
 ```bash
-npm install @statswhatshesaid/next
+npm install statswhatshesaid
 ```
 
 ## Use it
@@ -22,7 +22,7 @@ Add **one line** to your `middleware.ts`:
 
 ```ts
 // middleware.ts
-import stats from '@statswhatshesaid/next'
+import stats from 'statswhatshesaid'
 
 export default stats.middleware()
 
@@ -142,8 +142,8 @@ Works fine on `node:20-alpine`, `node:20-slim`, distroless — there are no nati
 If you want to stash the snapshot in Redis, Vercel KV, S3, or anything else, pass a `persist` adapter:
 
 ```ts
-import stats from '@statswhatshesaid/next'
-import type { PersistAdapter, SnapshotV1 } from '@statswhatshesaid/next'
+import stats from 'statswhatshesaid'
+import type { PersistAdapter, SnapshotV1 } from 'statswhatshesaid'
 
 const redisPersist: PersistAdapter = {
   load: () => {
@@ -193,7 +193,7 @@ export default stats.middleware({
 If you can't use `runtime: 'nodejs'` in middleware, call the tracker manually from a route handler or `instrumentation.ts`:
 
 ```ts
-import stats from '@statswhatshesaid/next'
+import stats from 'statswhatshesaid'
 import type { NextRequest } from 'next/server'
 
 export function GET(req: NextRequest) {
@@ -232,8 +232,8 @@ Versioning and publishing are managed with [Changesets](https://github.com/chang
 
 **One-time setup:**
 
-- The npm scope `@statswhatshesaid` must exist and you must own it (`npm org ls statswhatshesaid`).
-- Add an automation token to the GitHub repo as the `NPM_TOKEN` secret (`Settings → Secrets and variables → Actions`). Use a **granular** token scoped to publish `@statswhatshesaid/*`.
+- The unscoped package name `statswhatshesaid` must be available on npm (`npm view statswhatshesaid` — a 404 means it's yours for the taking on first publish).
+- Add an automation token to the GitHub repo as the `NPM_TOKEN` secret (`Settings → Secrets and variables → Actions`). Use a **granular** token scoped to publish the `statswhatshesaid` package.
 - In `Settings → Actions → General`, under *Workflow permissions*, allow GitHub Actions to **create and approve pull requests** so the release bot can open the version PR.
 
 **Manual publishing (escape hatch):**

@@ -12,7 +12,7 @@ export function resolveConfig(options: StatsOptions = {}): ResolvedConfig {
   const token = options.token ?? env.STATS_TOKEN
   if (!token) {
     throw new Error(
-      '[@statswhatshesaid/next] Missing required token. Set the STATS_TOKEN env var or pass `token` to stats.middleware({ token }).',
+      '[statswhatshesaid] Missing required token. Set the STATS_TOKEN env var or pass `token` to stats.middleware({ token }).',
     )
   }
 

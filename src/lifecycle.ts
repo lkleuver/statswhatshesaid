@@ -50,7 +50,7 @@ export function getOrInitRuntime(config: ResolvedConfig): StatsRuntime {
     } catch (err) {
       // Never let a flush error take down the process.
       // eslint-disable-next-line no-console
-      console.error('[@statswhatshesaid/next] flush failed:', err)
+      console.error('[statswhatshesaid] flush failed:', err)
     }
   }
 
@@ -61,7 +61,7 @@ export function getOrInitRuntime(config: ResolvedConfig): StatsRuntime {
       }
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error('[@statswhatshesaid/next] rollover failed:', err)
+      console.error('[statswhatshesaid] rollover failed:', err)
     }
     flush()
   }
@@ -104,7 +104,7 @@ function safeLoad(persist: PersistAdapter) {
     return persist.load()
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.error('[@statswhatshesaid/next] snapshot load failed:', err)
+    console.error('[statswhatshesaid] snapshot load failed:', err)
     return null
   }
 }
@@ -112,7 +112,7 @@ function safeLoad(persist: PersistAdapter) {
 function assertNodeRuntime(): void {
   if (typeof process === 'undefined' || !process.versions || !process.versions.node) {
     throw new Error(
-      "[@statswhatshesaid/next] This library requires the Node.js runtime. " +
+      "[statswhatshesaid] This library requires the Node.js runtime. " +
         "Set `export const config = { runtime: 'nodejs' }` in your middleware.ts " +
         '(requires Next.js 15.2 or newer).',
     )

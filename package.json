@@ -1,5 +1,5 @@
 {
-  "name": "@statswhatshesaid/next",
+  "name": "statswhatshesaid",
   "version": "0.0.0",
   "description": "A super minimal drop-in unique-visitors-per-day stats library for self-hosted Next.js.",
   "license": "MIT",
@@ -14,7 +14,6 @@
   },
   "homepage": "https://github.com/lkleuver/statswhatshesaid#readme",
   "publishConfig": {
-    "access": "public",
     "provenance": true
   },
   "engines": {
