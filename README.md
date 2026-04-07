@@ -28,7 +28,7 @@ export default stats.middleware()
 
 export const config = {
   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
-  runtime: 'nodejs', // REQUIRED — see "Edge Runtime" below
+  runtime: 'nodejs', // REQUIRED — see "Why isn't this just one line?" below
 }
 ```
 
@@ -59,18 +59,48 @@ You'll get JSON back:
 
 That's the whole library.
 
-## Edge Runtime — read this first
+## Why isn't this just one line?
 
-Next.js middleware defaults to the **Edge runtime**, which can't run `node:crypto` or `node:fs`. You **must** opt into the Node runtime:
+Honest answer: I tried, and Next.js won't let me. The minimum drop-in is a few lines because two independent constraints stack:
+
+### 1. Next.js middleware needs the Node runtime, and that has to be declared inline
+
+Next.js middleware defaults to the **Edge runtime**, which sandboxes away `node:fs` (no snapshot file) and gives you an async-only `crypto.subtle.digest` (which would force the hot path async). statswhatshesaid uses both, so the middleware has to opt into the Node runtime:
 
 ```ts
 export const config = {
-  matcher: [...],
-  runtime: 'nodejs',
+  runtime: 'nodejs', // requires Next.js 15.2+
 }
 ```
 
-This is stable in **Next.js 15.2 and newer**.
+I can't ship that line for you because of constraint #2.
+
+### 2. Next.js's middleware build step ignores re-exported `config`
+
+You might think the library could export a pre-baked `config` object you re-export from your `middleware.ts`:
+
+```ts
+// what I wish worked
+export { default, config } from 'statswhatshesaid/middleware'
+```
+
+It doesn't. Next.js does **static AST analysis** of `middleware.ts` at build time and only recognizes a literal top-level `export const config = {...}` with an inline object expression. It can't resolve imported identifiers or follow re-exports. A Next.js maintainer explained in [vercel/next.js#70008](https://github.com/vercel/next.js/issues/70008): *"the extractor would need to resolve identifiers or follow re-exports. That requires symbol resolution (and potentially executing code), which the middleware/proxy config parser intentionally avoids."*
+
+There's an open PR ([#90017](https://github.com/vercel/next.js/pull/90017)) that would fix this. Until it lands and ships in a stable Next, every middleware library in the ecosystem has to ask you to write the `config` block yourself. Clerk, next-intl, and the others all do the same.
+
+### So what's the actual minimum?
+
+Three lines + the import:
+
+```ts
+import stats from 'statswhatshesaid'
+export default stats.middleware()
+export const config = { runtime: 'nodejs' }
+```
+
+That's the floor today. If you also want a custom matcher (e.g. to skip your own static asset routes), the example at the top of this README shows how to set one.
+
+When [vercel/next.js#90017](https://github.com/vercel/next.js/pull/90017) (or equivalent) ships, this README will be updated with a one-line form.
 
 ## How a "unique visitor" is counted
 
