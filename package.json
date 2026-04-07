@@ -1,6 +1,6 @@
 {
   "name": "statswhatshesaid",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A super minimal one-line drop-in unique-visitors-per-day stats library for Next.js. In-memory, zero dependencies, runs in both Edge and Node runtimes.",
   "license": "MIT",
   "author": "Les Kleuver <les.kleuver@gmail.com>",
