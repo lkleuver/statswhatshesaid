@@ -27,17 +27,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Node 24 ships with npm 11.x, which has native support for OIDC
+      # trusted publishing. Don't try to upgrade npm in-place from a 10.x
+      # bundle — that races against the running npm process and corrupts
+      # the global install (the bundled arborist drops `promise-retry`
+      # mid-flight). Just use a Node version that already has the right
+      # npm.
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
-
-      # npm trusted publishing (OIDC) requires npm >= 11.5.1. Node 22 ships
-      # with npm 10.x, so we upgrade to the latest npm before publishing.
-      - name: Upgrade npm to a version that supports trusted publishing
-        run: npm install --global npm@latest
 
       - name: Install dependencies
         run: npm ci
