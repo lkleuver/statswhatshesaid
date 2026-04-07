@@ -12,10 +12,15 @@ jobs:
   release:
     name: Version or Publish
     runs-on: ubuntu-latest
+    # Bound to the `npm-publish` GitHub environment so trusted publishing
+    # via the npm trusted publisher rule is only accepted from jobs that
+    # target this environment. Enables required-reviewer protection and
+    # deployment-branch restrictions.
+    environment: npm-publish
     permissions:
       contents: write      # create release PR, push version bumps, create tags
       pull-requests: write # open and update the release PR
-      id-token: write      # npm provenance attestation
+      id-token: write      # npm OIDC trusted publishing + provenance attestation
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,9 +30,14 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           registry-url: https://registry.npmjs.org
+
+      # npm trusted publishing (OIDC) requires npm >= 11.5.1. Node 22 ships
+      # with npm 10.x, so we upgrade to the latest npm before publishing.
+      - name: Upgrade npm to a version that supports trusted publishing
+        run: npm install --global npm@latest
 
       - name: Install dependencies
         run: npm ci
@@ -40,6 +50,11 @@ jobs:
       #      "Version Packages" PR that bumps package.json + updates CHANGELOG.md.
       #   2. If that PR is merged (i.e. main has the version bump but no
       #      pending changesets), it publishes to npm.
+      #
+      # Trusted publishing: no NPM_TOKEN is passed. Modern npm automatically
+      # exchanges the GitHub OIDC token for a short-lived npm publish token
+      # using the trusted publisher configured on the npm side (workflow
+      # `release.yml`, environment `npm-publish`).
       - name: Create Release PR or Publish
         uses: changesets/action@v1
         with:
@@ -48,5 +63,4 @@ jobs:
           title: "chore(release): version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"

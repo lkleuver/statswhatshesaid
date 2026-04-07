@@ -144,3 +144,6 @@ vite.config.ts.timestamp-*
 
 # Local Claude Code settings
 .claude/
+
+# Never commit an npm auth file
+.npmrc

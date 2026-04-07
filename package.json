@@ -1,6 +1,6 @@
 {
   "name": "statswhatshesaid",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "A super minimal drop-in unique-visitors-per-day stats library for self-hosted Next.js.",
   "license": "MIT",
   "author": "Les Kleuver <les.kleuver@gmail.com>",
