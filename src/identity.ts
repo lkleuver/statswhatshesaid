@@ -10,8 +10,32 @@ export function utcDateString(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
+const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+/**
+ * True iff `s` is a real UTC calendar date in `YYYY-MM-DD` form. Rejects
+ * structurally-valid but calendrically-impossible dates like `2026-02-30`
+ * by round-tripping through `Date.UTC`.
+ */
+export function isValidUtcDate(s: string): boolean {
+  const m = DATE_RE.exec(s)
+  if (!m) return false
+  const year = Number(m[1])
+  const month = Number(m[2])
+  const day = Number(m[3])
+  const d = new Date(Date.UTC(year, month - 1, day))
+  return (
+    d.getUTCFullYear() === year &&
+    d.getUTCMonth() === month - 1 &&
+    d.getUTCDate() === day
+  )
+}
+
+/** Required number of bytes in a daily salt. */
+export const SALT_BYTES = 32
+
 export function generateSalt(): Buffer {
-  return randomBytes(32)
+  return randomBytes(SALT_BYTES)
 }
 
 /** Peer identifier used when no trusted IP is available. */
@@ -63,13 +87,24 @@ export function extractIp(headers: Headers, trustProxy: number): string {
 /**
  * Hash a visitor tuple with the day's salt. Returns the full 32-byte SHA-256
  * digest; callers that only need 64 bits (the HLL) can slice.
+ *
+ * Length-prefixing: each variable-length component (ip, ua) is preceded by
+ * its length as a 4-byte big-endian integer. This makes the pre-image
+ * unambiguous — no two distinct `(ip, ua)` pairs can produce the same byte
+ * sequence fed into SHA-256. A naive `ip + ":" + ua` encoding would allow
+ * pairs like `("1::2", "foo")` and `("1", ":2:foo")` to collide because of
+ * the embedded colons in IPv6 addresses.
  */
 export function computeVisitorHash(ip: string, ua: string, salt: Buffer): Buffer {
+  const ipBuf = Buffer.from(ip, 'utf8')
+  const uaBuf = Buffer.from(ua, 'utf8')
+  const lenBuf = Buffer.alloc(8)
+  lenBuf.writeUInt32BE(ipBuf.length, 0)
+  lenBuf.writeUInt32BE(uaBuf.length, 4)
   return createHash('sha256')
-    .update(ip)
-    .update(':')
-    .update(ua)
-    .update(':')
+    .update(lenBuf)
+    .update(ipBuf)
+    .update(uaBuf)
     .update(salt)
     .digest()
 }

@@ -7,6 +7,11 @@ const DEFAULT_HISTORY_DAYS = 90
 const DEFAULT_MAX_HISTORY_DAYS = 365
 const DEFAULT_TRUST_PROXY = 1
 const MIN_RECOMMENDED_TOKEN_LENGTH = 32
+const MIN_FLUSH_INTERVAL_MS = 1000
+// Match a conservative subset of path-safe characters. No CR/LF, spaces,
+// or shell metacharacters — this is compared against `req.nextUrl.pathname`
+// which is already URL-decoded, so we don't need to allow percent-escapes.
+const ENDPOINT_PATH_RE = /^\/[A-Za-z0-9\-._~/]*$/
 let weakTokenWarned = false
 
 export function resolveConfig(options: StatsOptions = {}): ResolvedConfig {
@@ -38,13 +43,26 @@ export function resolveConfig(options: StatsOptions = {}): ResolvedConfig {
   const flushIntervalMs =
     options.flushIntervalMs ??
     parseIntOr(env.STATS_FLUSH_INTERVAL_MS, DEFAULT_FLUSH_INTERVAL_MS)
+  requirePositiveInt(flushIntervalMs, 'flushIntervalMs')
+  if (flushIntervalMs < MIN_FLUSH_INTERVAL_MS) {
+    throw new Error(
+      `[statswhatshesaid] flushIntervalMs must be at least ${MIN_FLUSH_INTERVAL_MS} ms to avoid hammering the persist layer; got ${flushIntervalMs}.`,
+    )
+  }
 
-  const endpointPath = normalizePath(
-    options.endpointPath ?? env.STATS_ENDPOINT_PATH ?? DEFAULT_ENDPOINT_PATH,
-  )
+  const rawEndpointPath =
+    options.endpointPath ?? env.STATS_ENDPOINT_PATH ?? DEFAULT_ENDPOINT_PATH
+  const endpointPath = normalizePath(rawEndpointPath)
+  if (!ENDPOINT_PATH_RE.test(endpointPath)) {
+    throw new Error(
+      `[statswhatshesaid] Invalid endpointPath: ${JSON.stringify(rawEndpointPath)}. Must match /^\\/[A-Za-z0-9\\-._~/]*$/.`,
+    )
+  }
 
   const historyDays = options.historyDays ?? DEFAULT_HISTORY_DAYS
+  requireNonNegativeInt(historyDays, 'historyDays')
   const maxHistoryDays = options.maxHistoryDays ?? DEFAULT_MAX_HISTORY_DAYS
+  requireNonNegativeInt(maxHistoryDays, 'maxHistoryDays')
   const filterBots = options.filterBots ?? true
   const persist = options.persist ?? null
 
@@ -66,6 +84,22 @@ export function resolveConfig(options: StatsOptions = {}): ResolvedConfig {
     maxHistoryDays,
     filterBots,
     trustProxy: rawTrustProxy,
+  }
+}
+
+function requirePositiveInt(value: number, name: string): void {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(
+      `[statswhatshesaid] ${name} must be a positive integer; got ${value}.`,
+    )
+  }
+}
+
+function requireNonNegativeInt(value: number, name: string): void {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(
+      `[statswhatshesaid] ${name} must be a non-negative integer; got ${value}.`,
+    )
   }
 }
 

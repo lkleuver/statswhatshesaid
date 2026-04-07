@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 import { HLL_REGISTER_COUNT } from './hll.js'
+import { isValidUtcDate } from './identity.js'
 
 /**
  * Versioned on-disk representation of the entire store.
@@ -82,16 +83,30 @@ export class FileSnapshotAdapter implements PersistAdapter {
   }
 }
 
+/**
+ * Cheap structural validation. Does NOT verify that base64 fields decode to
+ * the expected byte counts — that's `VisitorStore.fromSnapshot`'s job, where
+ * we can wrap the work in try/catch and fall back gracefully. This function
+ * only rejects inputs that are obviously not a v1 snapshot.
+ */
 function isValidSnapshot(x: unknown): x is SnapshotV1 {
   if (!x || typeof x !== 'object') return false
   const o = x as Record<string, unknown>
   if (o.version !== 1) return false
-  if (typeof o.today !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(o.today)) return false
+  if (typeof o.today !== 'string' || !isValidUtcDate(o.today)) return false
   if (typeof o.salt !== 'string') return false
   if (typeof o.hllRegisters !== 'string') return false
-  if (typeof o.history !== 'object' || o.history === null) return false
+  // Reject arrays: typeof [] === 'object', which would otherwise pass.
+  if (
+    typeof o.history !== 'object' ||
+    o.history === null ||
+    Array.isArray(o.history)
+  ) {
+    return false
+  }
 
-  // Sanity-check the register array length (base64 → 16384 bytes → 21848 chars).
+  // Sanity-check the base64 string length for the register array.
+  // (The exact decoded byte count is re-verified in fromSnapshot.)
   const expectedBase64 = Math.ceil(HLL_REGISTER_COUNT / 3) * 4
   if (o.hllRegisters.length !== expectedBase64) return false
 

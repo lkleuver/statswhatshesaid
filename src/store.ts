@@ -1,5 +1,11 @@
-import { computeVisitorHash, generateSalt, utcDateString } from './identity.js'
-import { HyperLogLog } from './hll.js'
+import {
+  computeVisitorHash,
+  generateSalt,
+  isValidUtcDate,
+  SALT_BYTES,
+  utcDateString,
+} from './identity.js'
+import { HLL_REGISTER_COUNT, HyperLogLog } from './hll.js'
 import type { SnapshotV1 } from './snapshot.js'
 import type { DailyCount } from './types.js'
 
@@ -45,33 +51,46 @@ export class VisitorStore {
    * Build a store from a persisted snapshot. If the snapshot's `today` no
    * longer matches the current UTC date, the snapshot's HLL is finalized into
    * history and a fresh HLL + salt is created for `currentDate`.
+   *
+   * This path is the main "untrusted JSON" boundary — defensive at every
+   * step. Any decode/validation failure degrades gracefully: we keep what
+   * we can of history and start today fresh.
    */
   static fromSnapshot(snap: SnapshotV1, currentDate: string): VisitorStore {
-    const history = new Map<string, number>()
-    for (const [date, count] of Object.entries(snap.history)) {
-      if (typeof count === 'number' && Number.isFinite(count)) {
-        history.set(date, count)
-      }
-    }
+    const history = sanitizeHistory(snap.history, currentDate)
 
     if (snap.today === currentDate) {
-      const salt = Buffer.from(snap.salt, 'base64')
-      const registers = Buffer.from(snap.hllRegisters, 'base64')
-      const hll = new HyperLogLog(new Uint8Array(registers))
-      return new VisitorStore({
-        today: currentDate,
-        salt,
-        hll,
-        history,
-        dirty: false,
-      })
+      // Same-day restore: try to recover the salt + HLL registers so that
+      // a returning visitor within the same UTC day doesn't get double-
+      // counted. On ANY failure, start fresh — dropping a few minutes of
+      // deduped state is better than crashing the app.
+      try {
+        const salt = decodeSalt(snap.salt)
+        const registers = decodeRegisters(snap.hllRegisters)
+        const hll = new HyperLogLog(registers)
+        return new VisitorStore({
+          today: currentDate,
+          salt,
+          hll,
+          history,
+          dirty: false,
+        })
+      } catch {
+        return new VisitorStore({
+          today: currentDate,
+          salt: generateSalt(),
+          hll: new HyperLogLog(),
+          history,
+          dirty: true,
+        })
+      }
     }
 
     // Day boundary passed while the process was down. Finalize the old
     // sketch's estimate into history, then start today fresh.
     try {
-      const registers = Buffer.from(snap.hllRegisters, 'base64')
-      const oldHll = new HyperLogLog(new Uint8Array(registers))
+      const registers = decodeRegisters(snap.hllRegisters)
+      const oldHll = new HyperLogLog(registers)
       history.set(snap.today, oldHll.estimate())
     } catch {
       /* ignore bad registers; we'd rather lose one day than crash */
@@ -158,4 +177,57 @@ export class VisitorStore {
   markClean(): void {
     this._dirty = false
   }
+}
+
+/**
+ * Decode and validate a base64 salt field. Throws if it doesn't decode to
+ * exactly `SALT_BYTES` bytes. Callers should catch and fall back.
+ */
+function decodeSalt(saltBase64: string): Buffer {
+  const salt = Buffer.from(saltBase64, 'base64')
+  if (salt.length !== SALT_BYTES) {
+    throw new Error(
+      `invalid snapshot salt: expected ${SALT_BYTES} bytes, got ${salt.length}`,
+    )
+  }
+  return salt
+}
+
+/**
+ * Decode and validate a base64 HLL register array. Throws if it doesn't
+ * decode to exactly `HLL_REGISTER_COUNT` bytes. `Buffer.from(x, 'base64')`
+ * is lenient and silently ignores malformed characters, so we can't rely on
+ * the base64 string length alone — the decoded byte count is the real
+ * invariant the HLL constructor cares about.
+ */
+function decodeRegisters(registersBase64: string): Uint8Array {
+  const buf = Buffer.from(registersBase64, 'base64')
+  if (buf.length !== HLL_REGISTER_COUNT) {
+    throw new Error(
+      `invalid snapshot registers: expected ${HLL_REGISTER_COUNT} bytes, got ${buf.length}`,
+    )
+  }
+  return new Uint8Array(buf)
+}
+
+/**
+ * Filter a raw `history` object from an untrusted snapshot down to a clean
+ * Map, dropping any entry that isn't a real `YYYY-MM-DD` date key mapped
+ * to a non-negative integer. Also drops an entry matching `currentDate` —
+ * today's count is owned by the live HLL, not history.
+ */
+function sanitizeHistory(
+  raw: Record<string, number>,
+  currentDate: string,
+): Map<string, number> {
+  const out = new Map<string, number>()
+  for (const [date, count] of Object.entries(raw)) {
+    if (!isValidUtcDate(date)) continue
+    if (date === currentDate) continue
+    if (typeof count !== 'number') continue
+    if (!Number.isFinite(count) || !Number.isInteger(count)) continue
+    if (count < 0) continue
+    out.set(date, count)
+  }
+  return out
 }
