@@ -48,12 +48,20 @@ export class HyperLogLog {
 
   /**
    * Add a 64-bit hash (the first 8 bytes of a larger buffer are fine) to the
-   * sketch. This is the only mutating call on the hot path.
+   * sketch. This is the only mutating call on the hot path. Accepts any
+   * `Uint8Array` (including Node `Buffer`, which is a subclass).
    */
-  addHashBuffer(buf: Buffer): void {
-    // Big-endian view of the first 8 bytes.
-    const first = buf.readUInt32BE(0)
-    const second = buf.readUInt32BE(4)
+  addHashBuffer(buf: Uint8Array): void {
+    if (buf.length < 8) {
+      throw new Error(
+        `[statswhatshesaid] HLL hash input must be at least 8 bytes, got ${buf.length}`,
+      )
+    }
+    // Big-endian view of the first 8 bytes. Use DataView so we don't depend
+    // on Node's Buffer methods (we want to run in Edge runtime too).
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+    const first = dv.getUint32(0, false)
+    const second = dv.getUint32(4, false)
 
     // Top P=14 bits of the 64-bit hash → register index.
     const idx = first >>> TAIL_HIGH_BITS

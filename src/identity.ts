@@ -1,9 +1,13 @@
-import { createHash, randomBytes } from 'node:crypto'
-
 /**
- * Stateless identity helpers. Salt lifetime is owned by the runtime in
- * `lifecycle.ts` so it can be persisted in the snapshot file and swapped
- * atomically at the UTC-midnight rollover.
+ * Stateless identity helpers, runtime-agnostic.
+ *
+ * All crypto here uses the Web Crypto API (`globalThis.crypto.subtle` and
+ * `globalThis.crypto.getRandomValues`) so the library can run in both the
+ * Next.js Edge runtime and the Node runtime without any conditional code.
+ *
+ * Web Crypto's `subtle.digest` is async, which makes `computeVisitorHash`
+ * async, which in turn makes the middleware hot path async. Next.js
+ * supports async middleware natively.
  */
 
 export function utcDateString(d: Date): string {
@@ -34,8 +38,10 @@ export function isValidUtcDate(s: string): boolean {
 /** Required number of bytes in a daily salt. */
 export const SALT_BYTES = 32
 
-export function generateSalt(): Buffer {
-  return randomBytes(SALT_BYTES)
+export function generateSalt(): Uint8Array {
+  const salt = new Uint8Array(SALT_BYTES)
+  globalThis.crypto.getRandomValues(salt)
+  return salt
 }
 
 /** Peer identifier used when no trusted IP is available. */
@@ -46,26 +52,17 @@ export const UNKNOWN_PEER = '0.0.0.0'
  * RIGHT (server side) of the chain inward, skipping `trustProxy - 1` trusted
  * proxy hops. Returns the first "untrusted" entry as the client IP.
  *
- * This is the only safe way to consume XFF: the leftmost entry in the chain
- * is whatever the client sent originally, which is attacker-controlled
- * unless every proxy in front explicitly strips incoming XFF headers.
- *
  * Semantics:
  *   - `trustProxy === 0` — never read forwarding headers. All requests
- *     collapse to a single constant peer. Safest but breaks visitor
- *     counting when the process is behind any kind of proxy.
+ *     collapse to a single constant peer.
  *   - `trustProxy === N` — pick the Nth entry from the RIGHT of the XFF
  *     chain (1-indexed). If the chain is shorter than N, fall back to the
- *     constant peer (we can't safely identify the client).
+ *     constant peer.
  *
  * Examples with `trustProxy = 1` (default, single trusted proxy in front):
  *   XFF: "1.1.1.1"            →  "1.1.1.1"      (genuine)
  *   XFF: "9.9.9.9, 1.1.1.1"   →  "1.1.1.1"      (attacker forged 9.9.9.9)
  *   XFF: (absent)              →  "0.0.0.0"      (can't identify)
- *
- * With `trustProxy = 2` (e.g. Cloudflare → nginx → app):
- *   XFF: "1.1.1.1, 2.2.2.2"            →  "1.1.1.1"
- *   XFF: "9.9.9.9, 1.1.1.1, 2.2.2.2"   →  "1.1.1.1"
  */
 export function extractIp(headers: Headers, trustProxy: number): string {
   if (trustProxy < 1) return UNKNOWN_PEER
@@ -85,8 +82,8 @@ export function extractIp(headers: Headers, trustProxy: number): string {
 }
 
 /**
- * Hash a visitor tuple with the day's salt. Returns the full 32-byte SHA-256
- * digest; callers that only need 64 bits (the HLL) can slice.
+ * Hash a visitor tuple with the day's salt. Returns the 32-byte SHA-256
+ * digest as a `Uint8Array`. The HLL only consumes the first 8 bytes.
  *
  * Length-prefixing: each variable-length component (ip, ua) is preceded by
  * its length as a 4-byte big-endian integer. This makes the pre-image
@@ -95,72 +92,68 @@ export function extractIp(headers: Headers, trustProxy: number): string {
  * pairs like `("1::2", "foo")` and `("1", ":2:foo")` to collide because of
  * the embedded colons in IPv6 addresses.
  */
-export function computeVisitorHash(ip: string, ua: string, salt: Buffer): Buffer {
-  const ipBuf = Buffer.from(ip, 'utf8')
-  const uaBuf = Buffer.from(ua, 'utf8')
-  const lenBuf = Buffer.alloc(8)
-  lenBuf.writeUInt32BE(ipBuf.length, 0)
-  lenBuf.writeUInt32BE(uaBuf.length, 4)
-  return createHash('sha256')
-    .update(lenBuf)
-    .update(ipBuf)
-    .update(uaBuf)
-    .update(salt)
-    .digest()
+export async function computeVisitorHash(
+  ip: string,
+  ua: string,
+  salt: Uint8Array,
+): Promise<Uint8Array> {
+  const enc = new TextEncoder()
+  const ipBuf = enc.encode(ip)
+  const uaBuf = enc.encode(ua)
+
+  // 8-byte length header (two big-endian u32s) + ipBuf + uaBuf + salt.
+  const total = new Uint8Array(8 + ipBuf.length + uaBuf.length + salt.length)
+  const dv = new DataView(total.buffer)
+  dv.setUint32(0, ipBuf.length, false)
+  dv.setUint32(4, uaBuf.length, false)
+  total.set(ipBuf, 8)
+  total.set(uaBuf, 8 + ipBuf.length)
+  total.set(salt, 8 + ipBuf.length + uaBuf.length)
+
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', total)
+  return new Uint8Array(digest)
 }
 
 /**
- * Schedule a one-shot timer for the next UTC midnight (+1s buffer), which on
- * fire chains itself via setInterval every 24h. Returns a cancel function.
- * Callers are responsible for deciding what to do on the rollover — this
- * module doesn't own any state.
+ * Constant-time string comparison via SHA-256 prehash. Both inputs are
+ * hashed to fixed 32-byte buffers and then XOR-compared in constant time,
+ * so neither the length nor the content of either input leaks via timing.
  */
-export function scheduleMidnightTimer(
-  onMidnight: () => void,
-  now: Date = new Date(),
-): () => void {
-  let timer: ReturnType<typeof setTimeout> | null = null
-  let interval: ReturnType<typeof setInterval> | null = null
-
-  const msUntilNext = msUntilUtcMidnight(now) + 1000
-
-  timer = setTimeout(() => {
-    try {
-      onMidnight()
-    } catch {
-      /* never propagate out of a timer callback */
-    }
-    interval = setInterval(
-      () => {
-        try {
-          onMidnight()
-        } catch {
-          /* swallow */
-        }
-      },
-      24 * 60 * 60 * 1000,
-    )
-    interval.unref?.()
-  }, msUntilNext)
-  timer.unref?.()
-
-  return () => {
-    if (timer) clearTimeout(timer)
-    if (interval) clearInterval(interval)
-    timer = null
-    interval = null
+export async function constantTimeStringEqual(a: string, b: string): Promise<boolean> {
+  const enc = new TextEncoder()
+  const [ah, bh] = await Promise.all([
+    globalThis.crypto.subtle.digest('SHA-256', enc.encode(a)),
+    globalThis.crypto.subtle.digest('SHA-256', enc.encode(b)),
+  ])
+  const av = new Uint8Array(ah)
+  const bv = new Uint8Array(bh)
+  let diff = 0
+  for (let i = 0; i < av.length; i++) {
+    diff |= av[i]! ^ bv[i]!
   }
+  return diff === 0
 }
 
-function msUntilUtcMidnight(now: Date): number {
-  const next = Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate() + 1,
-    0,
-    0,
-    0,
-    0,
-  )
-  return next - now.getTime()
+/**
+ * Conservative list of paths the middleware should NOT track. Lets the user
+ * skip the `matcher` config entirely. Only matches well-known static paths,
+ * never extension-based, to avoid false positives on routes like
+ * `/api/data.json`.
+ */
+export function isStaticPath(pathname: string): boolean {
+  if (pathname.startsWith('/_next/')) return true
+  // Common well-known files at the root.
+  switch (pathname) {
+    case '/favicon.ico':
+    case '/favicon.svg':
+    case '/robots.txt':
+    case '/sitemap.xml':
+    case '/manifest.json':
+    case '/site.webmanifest':
+    case '/apple-touch-icon.png':
+    case '/apple-touch-icon-precomposed.png':
+      return true
+    default:
+      return false
+  }
 }

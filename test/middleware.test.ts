@@ -1,36 +1,30 @@
-import { mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { NextRequest } from 'next/server'
 
 import { createMiddleware } from '../src/middleware.js'
 import type { StatsRuntime } from '../src/lifecycle.js'
 
+const TOKEN = 'a-long-enough-token-for-this-test-xxxxxxx'
+
 function makeReq(path: string, headers: Record<string, string> = {}): NextRequest {
   return new NextRequest(`http://x.test${path}`, { headers })
 }
 
-function currentRuntime(): StatsRuntime {
-  return (globalThis as { __statswhatshesaid__?: StatsRuntime }).__statswhatshesaid__!
+function currentRuntime(): StatsRuntime | undefined {
+  return (globalThis as { __statswhatshesaid__?: StatsRuntime }).__statswhatshesaid__
 }
 
-const TOKEN = 'a-long-enough-token-for-this-test-xxxxxxx'
+function wipeSingleton(): void {
+  ;(globalThis as { __statswhatshesaid__?: unknown }).__statswhatshesaid__ = undefined
+}
 
 describe('createMiddleware', () => {
-  let tmpDir: string
-
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'statswhatshesaid-mw-'))
     process.env.STATS_TOKEN = TOKEN
-    process.env.STATS_SNAPSHOT_PATH = join(tmpDir, 'stats.json')
-    ;(globalThis as { __statswhatshesaid__?: unknown }).__statswhatshesaid__ = undefined
+    wipeSingleton()
   })
   afterEach(() => {
-    currentRuntime()?.shutdown()
-    ;(globalThis as { __statswhatshesaid__?: unknown }).__statswhatshesaid__ = undefined
-    delete process.env.STATS_SNAPSHOT_PATH
-    rmSync(tmpDir, { recursive: true, force: true })
+    wipeSingleton()
   })
 
   it('passes non-/stats requests through and increments the counter', async () => {
@@ -39,7 +33,7 @@ describe('createMiddleware', () => {
       makeReq('/', { 'user-agent': 'Mozilla/5.0', 'x-forwarded-for': '1.1.1.1' }),
     )
     expect(res.status).toBe(200)
-    expect(currentRuntime().store.estimateToday()).toBe(1)
+    expect(currentRuntime()!.store.estimateToday()).toBe(1)
   })
 
   it('dedupes the same visitor', async () => {
@@ -48,27 +42,41 @@ describe('createMiddleware', () => {
     await mw(makeReq('/', headers))
     await mw(makeReq('/about', headers))
     await mw(makeReq('/contact', headers))
-    expect(currentRuntime().store.estimateToday()).toBe(1)
+    expect(currentRuntime()!.store.estimateToday()).toBe(1)
   })
 
   it('counts distinct visitors separately', async () => {
     const mw = createMiddleware()
     await mw(makeReq('/', { 'user-agent': 'Mozilla/5.0', 'x-forwarded-for': '3.3.3.3' }))
     await mw(makeReq('/', { 'user-agent': 'Mozilla/5.0', 'x-forwarded-for': '4.4.4.4' }))
-    expect(currentRuntime().store.estimateToday()).toBe(2)
+    expect(currentRuntime()!.store.estimateToday()).toBe(2)
   })
 
   it('skips bot user agents when filterBots is true', async () => {
     const mw = createMiddleware()
     await mw(makeReq('/', { 'user-agent': 'Googlebot/2.1', 'x-forwarded-for': '5.5.5.5' }))
     await mw(makeReq('/', { 'user-agent': 'curl/8.0', 'x-forwarded-for': '6.6.6.6' }))
-    expect(currentRuntime().store.estimateToday()).toBe(0)
+    expect(currentRuntime()!.store.estimateToday()).toBe(0)
   })
 
   it('counts bots when filterBots is false', async () => {
     const mw = createMiddleware({ filterBots: false })
     await mw(makeReq('/', { 'user-agent': 'Googlebot/2.1', 'x-forwarded-for': '5.5.5.5' }))
-    expect(currentRuntime().store.estimateToday()).toBe(1)
+    expect(currentRuntime()!.store.estimateToday()).toBe(1)
+  })
+
+  it('skips static paths without tracking', async () => {
+    const mw = createMiddleware()
+    await mw(makeReq('/_next/static/chunks/main.js', {
+      'user-agent': 'Mozilla', 'x-forwarded-for': '1.1.1.1',
+    }))
+    await mw(makeReq('/favicon.ico', {
+      'user-agent': 'Mozilla', 'x-forwarded-for': '2.2.2.2',
+    }))
+    await mw(makeReq('/robots.txt', {
+      'user-agent': 'Mozilla', 'x-forwarded-for': '3.3.3.3',
+    }))
+    expect(currentRuntime()!.store.estimateToday()).toBe(0)
   })
 
   it('short-circuits to the stats endpoint with a correct token', async () => {
@@ -86,31 +94,9 @@ describe('createMiddleware', () => {
     expect(res.status).toBe(401)
   })
 
-  it('throws a clear error when STATS_TOKEN is missing', () => {
+  it('throws a clear error when STATS_TOKEN is missing', async () => {
     delete process.env.STATS_TOKEN
     const mw = createMiddleware()
-    expect(() => mw(makeReq('/'))).toThrow(/STATS_TOKEN/)
-  })
-
-  it('persists state across a simulated restart', async () => {
-    const mw1 = createMiddleware()
-    await mw1(makeReq('/', { 'user-agent': 'Mozilla/5.0', 'x-forwarded-for': '7.7.7.7' }))
-    await mw1(makeReq('/', { 'user-agent': 'Mozilla/5.0', 'x-forwarded-for': '8.8.8.8' }))
-    const before = currentRuntime().store.estimateToday()
-    expect(before).toBe(2)
-
-    // Simulate a restart: flush, shutdown, wipe the singleton, re-create.
-    currentRuntime().flush()
-    currentRuntime().shutdown()
-    ;(globalThis as { __statswhatshesaid__?: unknown }).__statswhatshesaid__ = undefined
-
-    const mw2 = createMiddleware()
-    // Just initializing should restore the snapshot.
-    await mw2(makeReq(`/stats?t=${TOKEN}`)) // lazy init + read
-    expect(currentRuntime().store.estimateToday()).toBe(2)
-
-    // The original visitors should still be considered seen.
-    await mw2(makeReq('/', { 'user-agent': 'Mozilla/5.0', 'x-forwarded-for': '7.7.7.7' }))
-    expect(currentRuntime().store.estimateToday()).toBe(2)
+    await expect(mw(makeReq('/'))).rejects.toThrow(/STATS_TOKEN/)
   })
 })

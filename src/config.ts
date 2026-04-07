@@ -1,13 +1,10 @@
 import type { ResolvedConfig, StatsOptions } from './types.js'
 
-const DEFAULT_SNAPSHOT_PATH = './.statswhatshesaid.json'
-const DEFAULT_FLUSH_INTERVAL_MS = 60 * 60 * 1000 // 1 hour
 const DEFAULT_ENDPOINT_PATH = '/stats'
 const DEFAULT_HISTORY_DAYS = 90
 const DEFAULT_MAX_HISTORY_DAYS = 365
 const DEFAULT_TRUST_PROXY = 1
 const MIN_RECOMMENDED_TOKEN_LENGTH = 32
-const MIN_FLUSH_INTERVAL_MS = 1000
 // Match a conservative subset of path-safe characters. No CR/LF, spaces,
 // or shell metacharacters — this is compared against `req.nextUrl.pathname`
 // which is already URL-decoded, so we don't need to allow percent-escapes.
@@ -15,16 +12,19 @@ const ENDPOINT_PATH_RE = /^\/[A-Za-z0-9\-._~/]*$/
 let weakTokenWarned = false
 
 export function resolveConfig(options: StatsOptions = {}): ResolvedConfig {
-  const env = typeof process !== 'undefined' ? process.env : ({} as NodeJS.ProcessEnv)
+  const env =
+    typeof process !== 'undefined' && process.env
+      ? process.env
+      : ({} as Record<string, string | undefined>)
 
   const token = options.token ?? env.STATS_TOKEN
   if (!token) {
     throw new Error(
-      '[statswhatshesaid] Missing required token. Set the STATS_TOKEN env var or pass `token` to stats.middleware({ token }).',
+      '[statswhatshesaid] Missing required token. Set the STATS_TOKEN env var or pass `token` to createMiddleware({ token }).',
     )
   }
   // Warn (not throw) if the token is short enough to brute-force.
-  // This is advisory — the user may have picked a memorable token on
+  // Advisory only — the user may have picked a memorable token on
   // purpose so they can check stats from anywhere without a keychain.
   if (!weakTokenWarned && token.length < MIN_RECOMMENDED_TOKEN_LENGTH) {
     weakTokenWarned = true
@@ -34,19 +34,6 @@ export function resolveConfig(options: StatsOptions = {}): ResolvedConfig {
         "Short tokens are vulnerable to brute-force attacks against the /stats endpoint. " +
         "Consider generating a strong token with: `openssl rand -hex 32`. " +
         "You can also rate-limit /stats at your reverse proxy or CDN.",
-    )
-  }
-
-  const snapshotPath =
-    options.snapshotPath ?? env.STATS_SNAPSHOT_PATH ?? DEFAULT_SNAPSHOT_PATH
-
-  const flushIntervalMs =
-    options.flushIntervalMs ??
-    parseIntOr(env.STATS_FLUSH_INTERVAL_MS, DEFAULT_FLUSH_INTERVAL_MS)
-  requirePositiveInt(flushIntervalMs, 'flushIntervalMs')
-  if (flushIntervalMs < MIN_FLUSH_INTERVAL_MS) {
-    throw new Error(
-      `[statswhatshesaid] flushIntervalMs must be at least ${MIN_FLUSH_INTERVAL_MS} ms to avoid hammering the persist layer; got ${flushIntervalMs}.`,
     )
   }
 
@@ -64,7 +51,6 @@ export function resolveConfig(options: StatsOptions = {}): ResolvedConfig {
   const maxHistoryDays = options.maxHistoryDays ?? DEFAULT_MAX_HISTORY_DAYS
   requireNonNegativeInt(maxHistoryDays, 'maxHistoryDays')
   const filterBots = options.filterBots ?? true
-  const persist = options.persist ?? null
 
   const rawTrustProxy =
     options.trustProxy ?? parseIntOr(env.STATS_TRUST_PROXY, DEFAULT_TRUST_PROXY, true)
@@ -76,22 +62,11 @@ export function resolveConfig(options: StatsOptions = {}): ResolvedConfig {
 
   return {
     token,
-    snapshotPath,
-    persist,
-    flushIntervalMs,
     endpointPath,
     historyDays,
     maxHistoryDays,
     filterBots,
     trustProxy: rawTrustProxy,
-  }
-}
-
-function requirePositiveInt(value: number, name: string): void {
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(
-      `[statswhatshesaid] ${name} must be a positive integer; got ${value}.`,
-    )
   }
 }
 

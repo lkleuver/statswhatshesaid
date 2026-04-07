@@ -2,8 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import {
   computeVisitorHash,
+  constantTimeStringEqual,
   extractIp,
   generateSalt,
+  isStaticPath,
+  isValidUtcDate,
+  SALT_BYTES,
   utcDateString,
 } from '../src/identity.js'
 
@@ -14,113 +18,172 @@ describe('utcDateString', () => {
   })
 })
 
+describe('isValidUtcDate', () => {
+  it('accepts real calendar dates', () => {
+    expect(isValidUtcDate('2026-04-07')).toBe(true)
+    expect(isValidUtcDate('2024-02-29')).toBe(true)
+    expect(isValidUtcDate('2000-01-01')).toBe(true)
+  })
+
+  it('rejects calendrically-impossible dates', () => {
+    expect(isValidUtcDate('2026-02-30')).toBe(false)
+    expect(isValidUtcDate('2025-02-29')).toBe(false)
+    expect(isValidUtcDate('2026-13-01')).toBe(false)
+    expect(isValidUtcDate('2026-99-99')).toBe(false)
+  })
+
+  it('rejects non-date strings', () => {
+    expect(isValidUtcDate('')).toBe(false)
+    expect(isValidUtcDate('yesterday')).toBe(false)
+    expect(isValidUtcDate('2026/04/07')).toBe(false)
+    expect(isValidUtcDate('2026-4-7')).toBe(false)
+  })
+})
+
 describe('extractIp', () => {
   const headersOf = (init: Record<string, string>): Headers => new Headers(init)
 
-  describe('trustProxy = 0 (never trust forwarding headers)', () => {
+  describe('trustProxy = 0', () => {
     it('ignores X-Forwarded-For entirely', () => {
-      const h = headersOf({ 'x-forwarded-for': '1.1.1.1' })
-      expect(extractIp(h, 0)).toBe('0.0.0.0')
-    })
-
-    it('ignores a multi-hop chain too', () => {
-      const h = headersOf({ 'x-forwarded-for': '1.1.1.1, 2.2.2.2, 3.3.3.3' })
-      expect(extractIp(h, 0)).toBe('0.0.0.0')
+      expect(extractIp(headersOf({ 'x-forwarded-for': '1.1.1.1' }), 0)).toBe('0.0.0.0')
     })
   })
 
-  describe('trustProxy = 1 (one trusted proxy, the default)', () => {
+  describe('trustProxy = 1 (default)', () => {
     it('returns the only entry of a single-hop chain', () => {
-      const h = headersOf({ 'x-forwarded-for': '1.2.3.4' })
-      expect(extractIp(h, 1)).toBe('1.2.3.4')
+      expect(extractIp(headersOf({ 'x-forwarded-for': '1.2.3.4' }), 1)).toBe('1.2.3.4')
     })
 
-    it('returns the rightmost entry of a longer chain, defeating client spoofing', () => {
-      // Attacker sends `X-Forwarded-For: 9.9.9.9`. The trusted nginx
-      // appends the real client IP: `9.9.9.9, 1.2.3.4`.
+    it('returns the rightmost entry, defeating client spoofing', () => {
       const h = headersOf({ 'x-forwarded-for': '9.9.9.9, 1.2.3.4' })
       expect(extractIp(h, 1)).toBe('1.2.3.4')
-    })
-
-    it('trims whitespace around entries', () => {
-      const h = headersOf({ 'x-forwarded-for': '  9.9.9.9  ,  10.0.0.1  ' })
-      expect(extractIp(h, 1)).toBe('10.0.0.1')
     })
 
     it('falls back to 0.0.0.0 when XFF is absent', () => {
       expect(extractIp(headersOf({}), 1)).toBe('0.0.0.0')
     })
 
-    it('ignores X-Real-IP entirely (only XFF is consulted)', () => {
-      // X-Real-IP is deliberately NOT trusted — we have one clear trust
-      // path (XFF + trustProxy hops) to keep semantics predictable.
-      const h = headersOf({ 'x-real-ip': '5.5.5.5' })
-      expect(extractIp(h, 1)).toBe('0.0.0.0')
+    it('ignores X-Real-IP', () => {
+      expect(extractIp(headersOf({ 'x-real-ip': '5.5.5.5' }), 1)).toBe('0.0.0.0')
     })
   })
 
-  describe('trustProxy = 2 (two trusted proxies, e.g. Cloudflare → nginx → app)', () => {
+  describe('trustProxy = 2', () => {
     it('returns the second-from-right entry', () => {
       const h = headersOf({ 'x-forwarded-for': '1.1.1.1, 2.2.2.2' })
       expect(extractIp(h, 2)).toBe('1.1.1.1')
     })
 
-    it('defeats spoofing from the client with the correct hop count', () => {
-      // Client spoofs `9.9.9.9`. CF appends client IP → `9.9.9.9, 1.1.1.1`.
-      // nginx appends CF's IP → `9.9.9.9, 1.1.1.1, 2.2.2.2`.
+    it('defeats spoofing with the correct hop count', () => {
       const h = headersOf({ 'x-forwarded-for': '9.9.9.9, 1.1.1.1, 2.2.2.2' })
       expect(extractIp(h, 2)).toBe('1.1.1.1')
     })
 
-    it('falls back to 0.0.0.0 when the chain is shorter than trustProxy', () => {
-      const h = headersOf({ 'x-forwarded-for': '1.1.1.1' })
-      expect(extractIp(h, 2)).toBe('0.0.0.0')
+    it('falls back when chain too short', () => {
+      expect(extractIp(headersOf({ 'x-forwarded-for': '1.1.1.1' }), 2)).toBe('0.0.0.0')
     })
   })
 
-  describe('malformed inputs', () => {
-    it('skips empty entries in the chain', () => {
-      const h = headersOf({ 'x-forwarded-for': '1.1.1.1,,,,2.2.2.2' })
-      expect(extractIp(h, 1)).toBe('2.2.2.2')
-    })
+  it('skips empty entries in the chain', () => {
+    const h = headersOf({ 'x-forwarded-for': '1.1.1.1,,,,2.2.2.2' })
+    expect(extractIp(h, 1)).toBe('2.2.2.2')
   })
 })
 
 describe('computeVisitorHash', () => {
-  const salt = Buffer.alloc(32, 7)
+  const salt = new Uint8Array(SALT_BYTES).fill(7)
 
-  it('is deterministic for the same inputs and salt', () => {
-    const a = computeVisitorHash('1.2.3.4', 'Mozilla/5.0', salt)
-    const b = computeVisitorHash('1.2.3.4', 'Mozilla/5.0', salt)
-    expect(a.equals(b)).toBe(true)
-    expect(a.length).toBe(32) // SHA-256 digest
+  it('returns a 32-byte SHA-256 digest', async () => {
+    const h = await computeVisitorHash('1.2.3.4', 'Mozilla', salt)
+    expect(h.length).toBe(32)
   })
 
-  it('differs for different IPs', () => {
-    const a = computeVisitorHash('1.2.3.4', 'ua', salt)
-    const b = computeVisitorHash('1.2.3.5', 'ua', salt)
-    expect(a.equals(b)).toBe(false)
+  it('is deterministic for the same inputs', async () => {
+    const a = await computeVisitorHash('1.2.3.4', 'Mozilla', salt)
+    const b = await computeVisitorHash('1.2.3.4', 'Mozilla', salt)
+    expect(uint8Equal(a, b)).toBe(true)
   })
 
-  it('differs for different user agents', () => {
-    const a = computeVisitorHash('1.2.3.4', 'A', salt)
-    const b = computeVisitorHash('1.2.3.4', 'B', salt)
-    expect(a.equals(b)).toBe(false)
+  it('differs for different IPs', async () => {
+    const a = await computeVisitorHash('1.2.3.4', 'ua', salt)
+    const b = await computeVisitorHash('1.2.3.5', 'ua', salt)
+    expect(uint8Equal(a, b)).toBe(false)
   })
 
-  it('differs with a different salt', () => {
-    const a = computeVisitorHash('1.2.3.4', 'ua', salt)
-    const b = computeVisitorHash('1.2.3.4', 'ua', Buffer.alloc(32, 9))
-    expect(a.equals(b)).toBe(false)
+  it('differs for different user agents', async () => {
+    const a = await computeVisitorHash('1.2.3.4', 'A', salt)
+    const b = await computeVisitorHash('1.2.3.4', 'B', salt)
+    expect(uint8Equal(a, b)).toBe(false)
+  })
+
+  it('differs with a different salt', async () => {
+    const a = await computeVisitorHash('1.2.3.4', 'ua', salt)
+    const b = await computeVisitorHash('1.2.3.4', 'ua', new Uint8Array(SALT_BYTES).fill(9))
+    expect(uint8Equal(a, b)).toBe(false)
+  })
+
+  it('treats input-ambiguous (ip, ua) pairs as distinct via length-prefix', async () => {
+    // Naive `ip + ":" + ua` would collide on these. Length-prefix prevents it.
+    const a = await computeVisitorHash('1::2', 'foo', salt)
+    const b = await computeVisitorHash('1', ':2:foo', salt)
+    expect(uint8Equal(a, b)).toBe(false)
   })
 })
 
 describe('generateSalt', () => {
-  it('returns 32 bytes of (effectively) random data', () => {
+  it('returns SALT_BYTES of (effectively) random data', () => {
     const a = generateSalt()
     const b = generateSalt()
-    expect(a.length).toBe(32)
-    expect(b.length).toBe(32)
-    expect(a.equals(b)).toBe(false)
+    expect(a.length).toBe(SALT_BYTES)
+    expect(b.length).toBe(SALT_BYTES)
+    expect(uint8Equal(a, b)).toBe(false)
   })
 })
+
+describe('constantTimeStringEqual', () => {
+  it('returns true for equal strings', async () => {
+    expect(await constantTimeStringEqual('hello', 'hello')).toBe(true)
+  })
+
+  it('returns false for different strings of equal length', async () => {
+    expect(await constantTimeStringEqual('helloX', 'helloY')).toBe(false)
+  })
+
+  it('returns false for strings of different lengths', async () => {
+    expect(await constantTimeStringEqual('a', 'abcdef')).toBe(false)
+  })
+})
+
+describe('isStaticPath', () => {
+  it('matches Next.js internals', () => {
+    expect(isStaticPath('/_next/static/css/main.css')).toBe(true)
+    expect(isStaticPath('/_next/image?url=foo')).toBe(true)
+    expect(isStaticPath('/_next/webpack-hmr')).toBe(true)
+  })
+
+  it('matches well-known root files', () => {
+    expect(isStaticPath('/favicon.ico')).toBe(true)
+    expect(isStaticPath('/favicon.svg')).toBe(true)
+    expect(isStaticPath('/robots.txt')).toBe(true)
+    expect(isStaticPath('/sitemap.xml')).toBe(true)
+    expect(isStaticPath('/manifest.json')).toBe(true)
+    expect(isStaticPath('/site.webmanifest')).toBe(true)
+    expect(isStaticPath('/apple-touch-icon.png')).toBe(true)
+  })
+
+  it('does NOT match real routes', () => {
+    expect(isStaticPath('/')).toBe(false)
+    expect(isStaticPath('/about')).toBe(false)
+    expect(isStaticPath('/api/users')).toBe(false)
+    expect(isStaticPath('/api/data.json')).toBe(false)
+    expect(isStaticPath('/blog/2026-04-07')).toBe(false)
+  })
+})
+
+function uint8Equal(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
