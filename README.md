@@ -209,9 +209,43 @@ npm install
 npm run typecheck
 npm run build
 npm test
+# or, all at once:
+npm run verify
 ```
 
 The example app under `examples/basic` is the simplest way to smoke-test changes end-to-end.
+
+## Releasing
+
+Versioning and publishing are managed with [Changesets](https://github.com/changesets/changesets) and automated via GitHub Actions.
+
+**Day-to-day flow:**
+
+1. Make your changes on a branch and open a PR.
+2. Add a changeset describing what changed:
+   ```bash
+   npx changeset
+   ```
+   Pick the bump type (patch / minor / major) and write a short summary. Commit the generated `.changeset/*.md` file.
+3. Merge the PR into `main`. The `Release` workflow will open (or update) a **"chore(release): version packages"** PR that bumps `package.json` and updates `CHANGELOG.md`.
+4. When you merge the release PR, the workflow publishes the new version to npm with [provenance](https://docs.npmjs.com/generating-provenance-statements) attached.
+
+**One-time setup:**
+
+- The npm scope `@statswhatshesaid` must exist and you must own it (`npm org ls statswhatshesaid`).
+- Add an automation token to the GitHub repo as the `NPM_TOKEN` secret (`Settings → Secrets and variables → Actions`). Use a **granular** token scoped to publish `@statswhatshesaid/*`.
+- In `Settings → Actions → General`, under *Workflow permissions*, allow GitHub Actions to **create and approve pull requests** so the release bot can open the version PR.
+
+**Manual publishing (escape hatch):**
+
+If you ever need to cut a release locally:
+
+```bash
+npx changeset version   # bumps package.json + updates CHANGELOG
+git commit -am "chore(release): version packages"
+git push
+npm run release         # verify + changeset publish
+```
 
 ## License
 
