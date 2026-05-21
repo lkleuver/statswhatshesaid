@@ -85,6 +85,10 @@ ${body}
   }
   function sparkPath(series) {
     if (!series || series.length === 0) return '';
+    if (series.length === 1) {
+      var mid = SVG_H / 2;
+      return 'M 0 ' + mid + ' L ' + SVG_W + ' ' + mid;
+    }
     var values = series.map(function (p) { return p.uniqueVisitors; });
     var min = Infinity, max = -Infinity;
     for (var i = 0; i < values.length; i++) {
@@ -92,7 +96,7 @@ ${body}
       if (values[i] > max) max = values[i];
     }
     var flat = max === min;
-    var step = values.length > 1 ? SVG_W / (values.length - 1) : 0;
+    var step = SVG_W / (values.length - 1);
     var parts = [];
     for (var j = 0; j < values.length; j++) {
       var x = Math.round(j * step * 100) / 100;
@@ -206,7 +210,7 @@ function renderTable(apps: OverviewApp[]): string {
   <td class="num">${todayCell}</td>
   <td><span${relativeAttr}>${escapeHtml(lastPolled || '—')}</span></td>
   <td>${svg}</td>
-  <td class="num">${a.total30d}</td>
+  <td class="num">${String(a.total30d)}</td>
 </tr>`
   }).join('\n')
   return `<table>
