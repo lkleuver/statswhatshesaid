@@ -28,10 +28,11 @@ export function buildSparklinePath(
   const stepX = width / (values.length - 1)
   const segments: string[] = []
   for (let i = 0; i < values.length; i++) {
+    const v = values[i] as number
     const x = round(i * stepX)
     const y = flat
       ? round(height / 2)
-      : round(height - ((values[i] - min) / range) * height)
+      : round(height - ((v - min) / range) * height)
     segments.push(i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`)
   }
   return segments.join(' ')
