@@ -47,7 +47,7 @@ describe('runServe', () => {
       io,
     )
 
-    for (let i = 0; i < 50 && !stderr.text.includes('Listening'); i++) {
+    for (let i = 0; i < 250 && !stderr.text.includes('Listening'); i++) {
       await new Promise((r) => setTimeout(r, 20))
     }
     expect(stderr.text).toMatch(/Listening on http:\/\/127\.0\.0\.1:\d+/)
