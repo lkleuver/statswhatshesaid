@@ -8,9 +8,10 @@ export interface RunServeOptions {
   /**
    * Abort signal. When aborted, the server is closed and runServe resolves
    * with exit code 0. The CLI wires this to SIGINT/SIGTERM; tests use an
-   * `AbortController` directly.
+   * `AbortController` directly. Required — passing nothing would leave the
+   * server running with no shutdown path.
    */
-  signal?: AbortSignal
+  signal: AbortSignal
 }
 
 /**
@@ -26,7 +27,9 @@ export async function runServe(opts: RunServeOptions, io: IoStreams): Promise<nu
       port: opts.port,
     })
   } catch (err) {
-    io.stderr.write(`swhsd-collect serve: ${opts.dbPath}: ${(err as Error).message}\n`)
+    io.stderr.write(
+      `swhsd-collect serve: failed to start (db=${opts.dbPath}, host=${opts.host}:${opts.port}): ${(err as Error).message}\n`,
+    )
     return 3
   }
 
@@ -39,9 +42,8 @@ export async function runServe(opts: RunServeOptions, io: IoStreams): Promise<nu
   return 0
 }
 
-function waitForAbort(signal: AbortSignal | undefined): Promise<void> {
+function waitForAbort(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    if (!signal) return
     if (signal.aborted) {
       resolve()
       return

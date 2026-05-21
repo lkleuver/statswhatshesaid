@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Writable } from 'node:stream'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 
 import { CollectorDb } from '../src/db.js'
 import { runServe } from '../src/serve-cmd.js'
@@ -59,8 +59,14 @@ describe('runServe', () => {
 
   it('returns 3 when the DB file does not exist', async () => {
     const { io, stderr } = makeIo()
+    const controller = new AbortController()
     const code = await runServe(
-      { dbPath: join(dbPath, 'missing.db'), host: '127.0.0.1', port: 0 },
+      {
+        dbPath: join(dbPath, 'missing.db'),
+        host: '127.0.0.1',
+        port: 0,
+        signal: controller.signal,
+      },
       io,
     )
     expect(code).toBe(3)
