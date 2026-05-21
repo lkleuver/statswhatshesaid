@@ -33,6 +33,8 @@ export class Queries {
        WHERE app = ? AND date >= ?
        ORDER BY date`,
     )
+    // `id DESC` breaks ties when two snapshots share an identical polled_at
+    // (rapid back-to-back polls within the same second).
     this.stmtLatestToday = db.prepare(
       `SELECT unique_visitors AS uniqueVisitors, polled_at AS polledAt
        FROM snapshots
