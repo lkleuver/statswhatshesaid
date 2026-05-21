@@ -13,7 +13,7 @@ export function buildSparklinePath(
   if (values.length === 0) return ''
   if (values.length === 1) {
     const mid = round(height / 2)
-    return `M 0 ${mid} L ${width} ${mid}`
+    return `M 0 ${mid} L ${round(width)} ${mid}`
   }
 
   let min = Infinity
