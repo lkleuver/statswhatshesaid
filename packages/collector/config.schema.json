@@ -8,7 +8,7 @@
     "$schema": { "type": "string" },
     "db": {
       "type": "string",
-      "description": "Path to the SQLite database. Default: ~/.local/share/statswhatshesaid/collector.db"
+      "description": "Path to the SQLite database. Relative paths resolve against the config file's directory. Default: ./collector.db next to the config file."
     },
     "defaults": {
       "type": "object",

@@ -5,8 +5,8 @@ import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  defaultDbPath,
   defaultXdgConfigPath,
-  defaultXdgDbPath,
   discoverConfig,
 } from '../src/config.js'
 
@@ -70,17 +70,17 @@ describe('defaultXdgConfigPath', () => {
   })
 })
 
-describe('defaultXdgDbPath', () => {
-  afterEach(() => vi.unstubAllEnvs())
-
-  it('uses $XDG_DATA_HOME when set', () => {
-    vi.stubEnv('XDG_DATA_HOME', '/custom/data')
-    expect(defaultXdgDbPath()).toBe('/custom/data/statswhatshesaid/collector.db')
+describe('defaultDbPath', () => {
+  it('returns collector.db next to the config file', () => {
+    expect(defaultDbPath('/etc/swhsd/config.json')).toBe('/etc/swhsd/collector.db')
   })
 
-  it('falls back to ~/.local/share when $XDG_DATA_HOME is unset', () => {
-    vi.stubEnv('XDG_DATA_HOME', '')
-    const p = defaultXdgDbPath()
-    expect(p).toMatch(/\/\.local\/share\/statswhatshesaid\/collector\.db$/)
+  it('handles a config in the current directory', () => {
+    expect(defaultDbPath('swhsd.json')).toBe('collector.db')
+  })
+
+  it('preserves nested config directories', () => {
+    expect(defaultDbPath('/home/user/.config/statswhatshesaid/config.json'))
+      .toBe('/home/user/.config/statswhatshesaid/collector.db')
   })
 })

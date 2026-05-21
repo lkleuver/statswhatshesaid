@@ -28,7 +28,7 @@ export async function runServe(opts: RunServeOptions, io: IoStreams): Promise<nu
     })
   } catch (err) {
     io.stderr.write(
-      `swhsd-collect serve: failed to start (db=${opts.dbPath}, host=${opts.host}:${opts.port}): ${(err as Error).message}\n`,
+      `statswhatshesaid-collector serve: failed to start (db=${opts.dbPath}, host=${opts.host}:${opts.port}): ${(err as Error).message}\n`,
     )
     return 3
   }

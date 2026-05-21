@@ -8,7 +8,7 @@ import { main } from './cli-main.js'
 main(process.argv.slice(2), { stdout: process.stdout, stderr: process.stderr }).then(
   (code) => process.exit(code),
   (err) => {
-    process.stderr.write(`swhsd-collect: unexpected error: ${err?.stack || err}\n`)
+    process.stderr.write(`statswhatshesaid-collector: unexpected error: ${err?.stack || err}\n`)
     process.exit(3)
   },
 )

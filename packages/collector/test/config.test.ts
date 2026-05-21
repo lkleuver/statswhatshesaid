@@ -50,7 +50,7 @@ describe('loadConfig', () => {
       expect(app.url).toBe('https://blog.example.com/stats')
       expect(app.token).toBe('a'.repeat(32))
       expect(app.timeoutMs).toBe(10000)
-      expect(app.userAgent).toBe('swhsd-collect/0.1')
+      expect(app.userAgent).toBe('statswhatshesaid-collector/0.1')
     }
   })
 

@@ -4,8 +4,8 @@ import { parseArgs } from 'node:util'
 
 import {
   ConfigError,
+  defaultDbPath,
   defaultXdgConfigPath,
-  defaultXdgDbPath,
   discoverConfig,
   expandTilde,
   loadConfig,
@@ -30,12 +30,12 @@ export interface IoStreams {
 }
 
 export const HELP = `
-swhsd-collect — poll statswhatshesaid endpoints and persist results to SQLite.
+statswhatshesaid-collector — poll statswhatshesaid endpoints and persist results to SQLite.
 
 Usage:
-  swhsd-collect [options]                Run one poll cycle (default).
-  swhsd-collect init [path]              Write a starter config file.
-  swhsd-collect serve [options]          Serve a local dashboard from the DB.
+  statswhatshesaid-collector [options]                Run one poll cycle (default).
+  statswhatshesaid-collector init [path]              Write a starter config file.
+  statswhatshesaid-collector serve [options]          Serve a local dashboard from the DB.
 
 Run options:
   --config <path>   Path to the config file (default: ./swhsd.json or XDG)
@@ -142,10 +142,9 @@ function parseCliArgs(argv: string[]): ParsedArgs {
 
 const STARTER_CONFIG = `{
   "$schema": "https://github.com/lkleuver/statswhatshesaid/raw/main/packages/collector/config.schema.json",
-  "db": "~/.local/share/statswhatshesaid/collector.db",
   "defaults": {
     "timeoutMs": 10000,
-    "userAgent": "swhsd-collect/0.1"
+    "userAgent": "statswhatshesaid-collector/0.1"
   },
   "apps": {
     "example": {
@@ -168,7 +167,7 @@ export async function main(argv: string[], io: IoStreams): Promise<number> {
   try {
     parsed = parseCliArgs(argv)
   } catch (err) {
-    io.stderr.write(`swhsd-collect: ${(err as Error).message}\n${HELP}\n`)
+    io.stderr.write(`statswhatshesaid-collector: ${(err as Error).message}\n${HELP}\n`)
     return 1
   }
 
@@ -186,12 +185,12 @@ export async function main(argv: string[], io: IoStreams): Promise<number> {
       await writeFile(target, STARTER_CONFIG, { flag: 'wx' })
     } catch (err) {
       io.stderr.write(
-        `swhsd-collect: cannot write starter config to ${target}: ${(err as Error).message}\n`,
+        `statswhatshesaid-collector: cannot write starter config to ${target}: ${(err as Error).message}\n`,
       )
       return 1
     }
     io.stdout.write(`Wrote starter config to ${target}\n`)
-    io.stdout.write('Edit it to point at your app(s), then run: swhsd-collect\n')
+    io.stdout.write('Edit it to point at your app(s), then run: statswhatshesaid-collector\n')
     return 0
   }
 
@@ -212,7 +211,7 @@ async function runCommand(parsed: ParsedArgs, io: IoStreams): Promise<number> {
       io.stderr.write(`${err.message}\n`)
       if (discovered.source === 'cwd') {
         io.stderr.write(
-          `Hint: run \`swhsd-collect init\` to create a starter config, or look for one at\n` +
+          `Hint: run \`statswhatshesaid-collector init\` to create a starter config, or look for one at\n` +
             `      ${defaultXdgConfigPath()}\n`,
         )
       }
@@ -223,9 +222,9 @@ async function runCommand(parsed: ParsedArgs, io: IoStreams): Promise<number> {
 
   if (parsed.verbose) {
     io.stderr.write(
-      `[swhsd-collect] config=${discovered.path}\n` +
-        `[swhsd-collect] db=${config.dbPath}\n` +
-        `[swhsd-collect] apps=${config.apps.map((a) => a.name).join(', ')}\n`,
+      `[statswhatshesaid-collector] config=${discovered.path}\n` +
+        `[statswhatshesaid-collector] db=${config.dbPath}\n` +
+        `[statswhatshesaid-collector] apps=${config.apps.map((a) => a.name).join(', ')}\n`,
     )
   }
 
@@ -306,7 +305,7 @@ async function resolveDbPath(configPath: string): Promise<string> {
   if (!parsed || typeof parsed !== 'object') {
     throw new ConfigError(`Config at ${configPath} must be a JSON object.`)
   }
-  if (!parsed.db) return defaultXdgDbPath()
+  if (!parsed.db) return defaultDbPath(configPath)
   const expanded = expandTilde(parsed.db)
   // Relative paths resolve against the config file's directory, matching
   // `loadConfig`'s behaviour — keeps `swhsd.json` portable across machines.

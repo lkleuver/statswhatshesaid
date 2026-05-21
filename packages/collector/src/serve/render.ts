@@ -187,7 +187,7 @@ ${body}
 function renderEmptyState(dbPath: string): string {
   return `<div class="empty">
   <p><strong>No data yet.</strong></p>
-  <p>Run <code>swhsd-collect</code> to record your first poll, then refresh this page.</p>
+  <p>Run <code>statswhatshesaid-collector</code> to record your first poll, then refresh this page.</p>
   <p class="meta">DB: <code>${escapeHtml(dbPath)}</code></p>
 </div>`
 }
