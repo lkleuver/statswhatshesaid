@@ -71,6 +71,14 @@ describe('startServer integration', () => {
     expect(res.status).toBe(404)
   })
 
+  it('returns 405 for non-GET requests', async () => {
+    CollectorDb.open(dbPath).close()
+    server = await startServer({ dbPath, host: '127.0.0.1', port: 0 })
+    const res = await fetch(server.url, { method: 'POST' })
+    expect(res.status).toBe(405)
+    expect(res.headers.get('content-type')).toMatch(/text\/plain/)
+  })
+
   it('rejects bind on a port already in use with a clear error', async () => {
     CollectorDb.open(dbPath).close()
     const first = await startServer({ dbPath, host: '127.0.0.1', port: 0 })

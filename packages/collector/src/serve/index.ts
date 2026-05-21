@@ -14,6 +14,7 @@ import {
   type HandlerResponse,
 } from './handlers.js'
 import { Queries } from './queries.js'
+import { escapeHtml } from './render.js'
 
 export interface StartServerOptions {
   dbPath: string
@@ -28,18 +29,6 @@ export interface RunningServer {
   url: string
   /** Gracefully close the listener and the DB handle. */
   close: () => Promise<void>
-}
-
-const HTML_ESCAPES: Record<string, string> = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&#39;',
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => HTML_ESCAPES[c] ?? c)
 }
 
 /**
