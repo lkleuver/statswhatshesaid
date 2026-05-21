@@ -8,7 +8,7 @@ import type { ResolvedConfig } from '../src/types.js'
 
 const TOKEN = 'a-long-enough-token-for-this-test-xxxxxxx'
 
-function makeRuntime(token = TOKEN): StatsRuntime {
+function makeRuntime(token = TOKEN, saltSecret: string | null = null): StatsRuntime {
   const config: ResolvedConfig = {
     token,
     endpointPath: '/stats',
@@ -16,10 +16,11 @@ function makeRuntime(token = TOKEN): StatsRuntime {
     maxHistoryDays: 365,
     filterBots: true,
     trustProxy: 1,
+    saltSecret,
   }
   return {
     config,
-    store: VisitorStore.fresh('2026-04-07'),
+    store: VisitorStore.fresh('2026-04-07', saltSecret),
   }
 }
 
@@ -92,5 +93,62 @@ describe('handleStatsEndpoint', () => {
       headers: { authorization: `Bearer ${TOKEN}` },
     })
     expect((await handleStatsEndpoint(req, runtime)).status).toBe(200)
+  })
+})
+
+describe('handleStatsEndpoint ?format=raw', () => {
+  it('omits sketch and saltFingerprint when shared-salt mode is OFF', async () => {
+    const runtime = makeRuntime(TOKEN, null)
+    const req = new NextRequest(`http://x.test/stats?t=${TOKEN}&format=raw`)
+    const res = await handleStatsEndpoint(req, runtime)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      today: { sketch?: string; saltFingerprint?: string }
+    }
+    expect(body.today.sketch).toBeUndefined()
+    expect(body.today.saltFingerprint).toBeUndefined()
+  })
+
+  it('returns sketch and saltFingerprint when shared-salt mode is ON', async () => {
+    const runtime = makeRuntime(TOKEN, 'a-strong-shared-salt-secret-xxxxxxxxxxxx')
+    await runtime.store.track('1.1.1.1', 'ua-a')
+    const req = new NextRequest(`http://x.test/stats?t=${TOKEN}&format=raw`)
+    const res = await handleStatsEndpoint(req, runtime)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      today: {
+        date: string
+        uniqueVisitors: number
+        sketch?: string
+        saltFingerprint?: string
+      }
+    }
+    expect(body.today.uniqueVisitors).toBe(1)
+    expect(body.today.sketch).toMatch(/^[A-Za-z0-9+/=]+$/)
+    expect(body.today.saltFingerprint).toMatch(/^[0-9a-f]{16}$/)
+  })
+
+  it('two stores with the same secret produce the same saltFingerprint for the same date', async () => {
+    const secret = 'shared-secret-across-replicas-xxxxxxxxxxxxx'
+    const a = makeRuntime(TOKEN, secret)
+    const b = makeRuntime(TOKEN, secret)
+    // Force salts to materialize.
+    await a.store.track('1.1.1.1', 'ua')
+    await b.store.track('2.2.2.2', 'ua')
+
+    const fpA = await a.store.exposeTodaySketch()
+    const fpB = await b.store.exposeTodaySketch()
+    expect(fpA.saltFingerprint).toBe(fpB.saltFingerprint)
+  })
+
+  it('omits sketch when ?format=raw is not requested', async () => {
+    const runtime = makeRuntime(TOKEN, 'a-strong-shared-salt-secret-xxxxxxxxxxxx')
+    const req = new NextRequest(`http://x.test/stats?t=${TOKEN}`)
+    const res = await handleStatsEndpoint(req, runtime)
+    const body = (await res.json()) as {
+      today: { sketch?: string; saltFingerprint?: string }
+    }
+    expect(body.today.sketch).toBeUndefined()
+    expect(body.today.saltFingerprint).toBeUndefined()
   })
 })

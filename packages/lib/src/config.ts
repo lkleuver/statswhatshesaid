@@ -5,11 +5,13 @@ const DEFAULT_HISTORY_DAYS = 90
 const DEFAULT_MAX_HISTORY_DAYS = 365
 const DEFAULT_TRUST_PROXY = 1
 const MIN_RECOMMENDED_TOKEN_LENGTH = 32
+const MIN_RECOMMENDED_SALT_SECRET_LENGTH = 32
 // Match a conservative subset of path-safe characters. No CR/LF, spaces,
 // or shell metacharacters — this is compared against `req.nextUrl.pathname`
 // which is already URL-decoded, so we don't need to allow percent-escapes.
 const ENDPOINT_PATH_RE = /^\/[A-Za-z0-9\-._~/]*$/
 let weakTokenWarned = false
+let weakSaltSecretWarned = false
 
 export function resolveConfig(options: StatsOptions = {}): ResolvedConfig {
   const env =
@@ -60,6 +62,23 @@ export function resolveConfig(options: StatsOptions = {}): ResolvedConfig {
     )
   }
 
+  const rawSaltSecret = options.saltSecret ?? env.STATS_SALT_SECRET
+  const saltSecret = rawSaltSecret && rawSaltSecret.length > 0 ? rawSaltSecret : null
+  if (
+    saltSecret &&
+    !weakSaltSecretWarned &&
+    saltSecret.length < MIN_RECOMMENDED_SALT_SECRET_LENGTH
+  ) {
+    weakSaltSecretWarned = true
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[statswhatshesaid] Warning: STATS_SALT_SECRET is shorter than ${MIN_RECOMMENDED_SALT_SECRET_LENGTH} characters (${saltSecret.length}). ` +
+        'A weak secret makes the daily salt easier to guess, which weakens the privacy ' +
+        'guarantee that an attacker cannot rederive `(ip, ua)` pairs from their hashes. ' +
+        'Generate a strong secret with: `openssl rand -hex 32`.',
+    )
+  }
+
   return {
     token,
     endpointPath,
@@ -67,6 +86,7 @@ export function resolveConfig(options: StatsOptions = {}): ResolvedConfig {
     maxHistoryDays,
     filterBots,
     trustProxy: rawTrustProxy,
+    saltSecret,
   }
 }
 

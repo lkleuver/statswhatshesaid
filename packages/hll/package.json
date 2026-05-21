@@ -1,0 +1,29 @@
+{
+  "name": "@swhsd/hll",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Internal HyperLogLog primitives shared by statswhatshesaid and statswhatshesaid-collector. Not published.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.0"
+  }
+}

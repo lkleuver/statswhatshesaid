@@ -44,6 +44,48 @@ export function generateSalt(): Uint8Array {
   return salt
 }
 
+/**
+ * Derive a deterministic 32-byte daily salt from a shared secret and a UTC
+ * calendar date. Two replicas running with the same `secret` will produce
+ * the same daily salt for the same `utcDate`, which is the mathematical
+ * precondition for an external collector to merge HLL sketches across
+ * replicas.
+ *
+ * Implementation: HMAC-SHA-256(secret, utcDate). The salt rotates daily,
+ * preserving cross-day unlinkability — yesterday's hash of `(ip, ua)` is
+ * unrelated to today's hash of the same tuple.
+ */
+export async function deriveDailySalt(
+  secret: string,
+  utcDate: string,
+): Promise<Uint8Array> {
+  const enc = new TextEncoder()
+  const key = await globalThis.crypto.subtle.importKey(
+    'raw',
+    enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  const sig = await globalThis.crypto.subtle.sign('HMAC', key, enc.encode(utcDate))
+  return new Uint8Array(sig)
+}
+
+/**
+ * Compact identifier for a given salt: SHA-256(salt), truncated to the
+ * first 8 bytes, hex-encoded. Lets the collector confirm two replicas are
+ * using the same daily salt before merging their sketches. 64 bits is
+ * enough to make accidental collisions astronomically unlikely while
+ * staying short on the wire.
+ */
+export async function computeSaltFingerprint(salt: Uint8Array): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', salt)
+  const bytes = new Uint8Array(digest, 0, 8)
+  let hex = ''
+  for (const b of bytes) hex += b.toString(16).padStart(2, '0')
+  return hex
+}
+
 /** Peer identifier used when no trusted IP is available. */
 export const UNKNOWN_PEER = '0.0.0.0'
 

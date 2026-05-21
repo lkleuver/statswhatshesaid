@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  computeSaltFingerprint,
   computeVisitorHash,
   constantTimeStringEqual,
+  deriveDailySalt,
   extractIp,
   generateSalt,
   isStaticPath,
@@ -187,3 +189,50 @@ function uint8Equal(a: Uint8Array, b: Uint8Array): boolean {
   }
   return true
 }
+
+describe('deriveDailySalt', () => {
+  it('produces a 32-byte salt', async () => {
+    const salt = await deriveDailySalt('a-shared-secret', '2026-04-07')
+    expect(salt).toBeInstanceOf(Uint8Array)
+    expect(salt.length).toBe(SALT_BYTES)
+  })
+
+  it('is deterministic for the same (secret, date) input', async () => {
+    const a = await deriveDailySalt('shared', '2026-04-07')
+    const b = await deriveDailySalt('shared', '2026-04-07')
+    expect(uint8Equal(a, b)).toBe(true)
+  })
+
+  it('rotates on a different date', async () => {
+    const today = await deriveDailySalt('shared', '2026-04-07')
+    const tomorrow = await deriveDailySalt('shared', '2026-04-08')
+    expect(uint8Equal(today, tomorrow)).toBe(false)
+  })
+
+  it('differs across different secrets for the same date', async () => {
+    const a = await deriveDailySalt('secret-a', '2026-04-07')
+    const b = await deriveDailySalt('secret-b', '2026-04-07')
+    expect(uint8Equal(a, b)).toBe(false)
+  })
+})
+
+describe('computeSaltFingerprint', () => {
+  it('returns a 16-character lowercase hex string (8 bytes)', async () => {
+    const salt = await deriveDailySalt('shared', '2026-04-07')
+    const fp = await computeSaltFingerprint(salt)
+    expect(fp).toMatch(/^[0-9a-f]{16}$/)
+  })
+
+  it('is deterministic for the same salt', async () => {
+    const salt = await deriveDailySalt('shared', '2026-04-07')
+    const a = await computeSaltFingerprint(salt)
+    const b = await computeSaltFingerprint(salt)
+    expect(a).toBe(b)
+  })
+
+  it('differs across different salts', async () => {
+    const a = await computeSaltFingerprint(await deriveDailySalt('shared', '2026-04-07'))
+    const b = await computeSaltFingerprint(await deriveDailySalt('shared', '2026-04-08'))
+    expect(a).not.toBe(b)
+  })
+})

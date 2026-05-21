@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "statswhatshesaid-collector config",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apps"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "db": {
+      "type": "string",
+      "description": "Path to the SQLite database. Default: ~/.local/share/statswhatshesaid/collector.db"
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeoutMs": { "type": "integer", "minimum": 1 },
+        "userAgent": { "type": "string", "minLength": 1 }
+      }
+    },
+    "apps": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["token"],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Single endpoint URL. Mutually exclusive with `replicas`."
+          },
+          "replicas": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 2,
+            "description": "Per-replica URLs. Requires `merge: true`."
+          },
+          "token": {
+            "type": "string",
+            "minLength": 1,
+            "description": "STATS_TOKEN for this app."
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "merge": {
+            "type": "boolean",
+            "description": "Required when `replicas` is set. Acknowledges multi-replica HLL merge."
+          }
+        },
+        "oneOf": [
+          {
+            "required": ["url"],
+            "not": { "required": ["replicas"] }
+          },
+          {
+            "required": ["replicas", "merge"],
+            "not": { "required": ["url"] }
+          }
+        ]
+      }
+    }
+  }
+}

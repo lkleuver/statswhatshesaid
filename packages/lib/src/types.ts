@@ -22,6 +22,22 @@ export interface StatsOptions {
    * See the Security section of the README for configuration examples.
    */
   trustProxy?: number
+  /**
+   * Shared secret used to derive the daily HLL salt deterministically.
+   *
+   * When set, the daily salt becomes `HMAC-SHA-256(saltSecret, utcDate)`
+   * instead of a random per-process value. Two replicas running with the
+   * same `saltSecret` will derive identical daily salts — the mathematical
+   * precondition for an external collector to merge HLL sketches across
+   * replicas and report a correct union cardinality.
+   *
+   * When unset, salts remain random per-process (the previous behavior).
+   * Falls back to the `STATS_SALT_SECRET` env var.
+   *
+   * Cross-day unlinkability is preserved either way — the salt still
+   * rotates daily.
+   */
+  saltSecret?: string
 }
 
 export interface ResolvedConfig {
@@ -31,6 +47,8 @@ export interface ResolvedConfig {
   maxHistoryDays: number
   filterBots: boolean
   trustProxy: number
+  /** Resolved shared salt secret, or `null` if not configured. */
+  saltSecret: string | null
 }
 
 export interface DailyCount {
@@ -38,8 +56,20 @@ export interface DailyCount {
   uniqueVisitors: number
 }
 
+/**
+ * `today` in the /stats response. Has the same `date` + `uniqueVisitors`
+ * fields as a historical day. When the request asks for raw format AND
+ * shared-salt mode is active, the response also includes the raw HLL
+ * register array (base64) and a fingerprint of the salt — enough for the
+ * external collector to merge sketches across replicas.
+ */
+export interface TodayCount extends DailyCount {
+  sketch?: string
+  saltFingerprint?: string
+}
+
 export interface StatsResponseBody {
-  today: DailyCount
+  today: TodayCount
   history: DailyCount[]
   generatedAt: string
 }

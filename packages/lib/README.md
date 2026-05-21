@@ -123,6 +123,18 @@ Configure via env vars (preferred for `STATS_TOKEN`) or by passing options to `c
 | `maxHistoryDays` | — | `365` (kept in memory) |
 | `filterBots` | — | `true` |
 | `trustProxy` | `STATS_TRUST_PROXY` | `1` (see [Security](#security) below) |
+| `saltSecret` | `STATS_SALT_SECRET` | unset (see [Multi-replica deployments](#multi-replica-deployments) below) |
+
+## Multi-replica deployments
+
+The default in-memory design is single-instance: each Next.js worker has its own HyperLogLog sketch. If you run multiple replicas, each replica counts the visitors it serves, with no awareness of the others — visitor numbers across `/stats` will differ from replica to replica.
+
+If you want a single consolidated number across replicas, you can opt in to **shared-salt mode** and pair it with an external collector that merges sketches:
+
+1. Set `STATS_SALT_SECRET` (any long random string — `openssl rand -hex 32`) to the **same value** on every replica. The daily HLL salt then becomes `HMAC-SHA-256(saltSecret, utcDate)` — deterministic across replicas, still rotating daily, so cross-day unlinkability is preserved.
+2. Run [`statswhatshesaid-collector`](../collector) — an external CLI — on a machine you control. Configure it with the per-replica URLs and the `STATS_TOKEN`. The collector polls `/stats?format=raw` from each replica, fetches the raw HLL register array plus a salt fingerprint, verifies the fingerprints match, merges the sketches register-wise (element-wise max), and stores the merged daily number in a local SQLite database.
+
+If you don't set `STATS_SALT_SECRET`, the library behaves exactly as before — random per-process salts, `/stats?format=raw` simply ignored — and you can run a single-replica deployment without any of this.
 
 ## Security
 

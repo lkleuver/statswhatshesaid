@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { VisitorStore } from '../src/store.js'
 
@@ -11,11 +11,17 @@ describe('VisitorStore', () => {
   })
 
   it('track() increments the cardinality estimate and dedupes', async () => {
-    const s = VisitorStore.fresh('2026-04-07')
-    await s.track('1.1.1.1', 'ua-a')
-    await s.track('2.2.2.2', 'ua-b')
-    await s.track('1.1.1.1', 'ua-a') // duplicate
-    expect(s.estimateToday()).toBe(2)
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-07T12:00:00Z'))
+    try {
+      const s = VisitorStore.fresh('2026-04-07')
+      await s.track('1.1.1.1', 'ua-a')
+      await s.track('2.2.2.2', 'ua-b')
+      await s.track('1.1.1.1', 'ua-a') // duplicate
+      expect(s.estimateToday()).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('rollOverIfNeeded finalizes the current day into history', () => {
@@ -25,13 +31,22 @@ describe('VisitorStore', () => {
   })
 
   it('rollOverIfNeeded preserves the previous day count in history', async () => {
-    const s = VisitorStore.fresh('2026-04-07')
-    await s.track('1.1.1.1', 'ua')
-    await s.track('2.2.2.2', 'ua')
-    s.rollOverIfNeeded(new Date('2026-04-08T00:00:01Z'))
-    const hist = s.getHistoryDesc(90)
-    expect(hist).toEqual([{ date: '2026-04-07', uniqueVisitors: 2 }])
-    expect(s.estimateToday()).toBe(0)
+    // track() consults the real clock via rollOverIfNeeded(), so freeze
+    // wall time to a moment inside the fresh-store's day to keep the test
+    // deterministic regardless of when CI runs.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-07T12:00:00Z'))
+    try {
+      const s = VisitorStore.fresh('2026-04-07')
+      await s.track('1.1.1.1', 'ua')
+      await s.track('2.2.2.2', 'ua')
+      s.rollOverIfNeeded(new Date('2026-04-08T00:00:01Z'))
+      const hist = s.getHistoryDesc(90)
+      expect(hist).toEqual([{ date: '2026-04-07', uniqueVisitors: 2 }])
+      expect(s.estimateToday()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('rollOverIfNeeded is a no-op within the same UTC day', () => {
@@ -41,19 +56,21 @@ describe('VisitorStore', () => {
   })
 
   it('manual rollOverIfNeeded resets the salt so the same hash inputs produce a new HLL position', async () => {
-    // We can't reliably test the lazy rollover from inside `track()` here
-    // because it consults the real clock. Instead, exercise the same code
-    // path via a direct rollOver call: after rollover, the previous day's
-    // count moves to history and today starts at zero with a fresh salt.
-    const s = VisitorStore.fresh('2026-04-07')
-    await s.track('1.1.1.1', 'ua-a')
-    await s.track('2.2.2.2', 'ua-b')
-    expect(s.estimateToday()).toBe(2)
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-07T12:00:00Z'))
+    try {
+      const s = VisitorStore.fresh('2026-04-07')
+      await s.track('1.1.1.1', 'ua-a')
+      await s.track('2.2.2.2', 'ua-b')
+      expect(s.estimateToday()).toBe(2)
 
-    s.rollOverIfNeeded(new Date('2026-04-08T01:00:00Z'))
-    expect(s.today).toBe('2026-04-08')
-    expect(s.estimateToday()).toBe(0)
-    expect(s.getHistoryDesc(90)).toEqual([{ date: '2026-04-07', uniqueVisitors: 2 }])
+      s.rollOverIfNeeded(new Date('2026-04-08T01:00:00Z'))
+      expect(s.today).toBe('2026-04-08')
+      expect(s.estimateToday()).toBe(0)
+      expect(s.getHistoryDesc(90)).toEqual([{ date: '2026-04-07', uniqueVisitors: 2 }])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('trimHistory drops the oldest entries past the cap', () => {
@@ -74,10 +91,16 @@ describe('VisitorStore', () => {
   })
 
   it('getHistoryDesc excludes today', async () => {
-    const s = VisitorStore.fresh('2026-04-07')
-    await s.track('1.1.1.1', 'ua')
-    s.rollOverIfNeeded(new Date('2026-04-08T01:00:00Z'))
-    const hist = s.getHistoryDesc(90)
-    expect(hist.find((h) => h.date === '2026-04-08')).toBeUndefined()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-07T12:00:00Z'))
+    try {
+      const s = VisitorStore.fresh('2026-04-07')
+      await s.track('1.1.1.1', 'ua')
+      s.rollOverIfNeeded(new Date('2026-04-08T01:00:00Z'))
+      const hist = s.getHistoryDesc(90)
+      expect(hist.find((h) => h.date === '2026-04-08')).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

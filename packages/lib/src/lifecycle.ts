@@ -25,7 +25,7 @@ export function getOrInitRuntime(config: ResolvedConfig): StatsRuntime {
   if (globalThis.__statswhatshesaid__) return globalThis.__statswhatshesaid__
 
   const today = utcDateString(new Date())
-  const store = VisitorStore.fresh(today)
+  const store = VisitorStore.fresh(today, config.saltSecret)
   store.trimHistory(config.maxHistoryDays)
 
   const runtime: StatsRuntime = { config, store }

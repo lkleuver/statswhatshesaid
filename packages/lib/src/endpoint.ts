@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
+import { encodeRegistersBase64 } from '@swhsd/hll'
+
 import { constantTimeStringEqual } from './identity.js'
 import type { StatsRuntime } from './lifecycle.js'
-import type { StatsResponseBody } from './types.js'
+import type { StatsResponseBody, TodayCount } from './types.js'
 
 export async function handleStatsEndpoint(
   req: NextRequest,
@@ -21,17 +23,39 @@ export async function handleStatsEndpoint(
   // even if no track() call has triggered a rollover yet.
   runtime.store.rollOverIfNeeded()
 
+  const today: TodayCount = {
+    date: runtime.store.today,
+    uniqueVisitors: runtime.store.estimateToday(),
+  }
+
+  // Raw format export — only meaningful when shared-salt mode is on, since
+  // sketches built from random per-process salts can't be merged across
+  // replicas. If the caller asked for raw without shared-salt mode, we
+  // respond as if they hadn't asked. (The collector treats absence of
+  // `sketch` as "this server doesn't support merging".)
+  if (isRawFormatRequested(req) && runtime.store.isSharedSaltMode()) {
+    const sketch = await runtime.store.exposeTodaySketch()
+    today.sketch = encodeRegistersBase64(sketch.registers)
+    today.saltFingerprint = sketch.saltFingerprint
+  }
+
   const body: StatsResponseBody = {
-    today: {
-      date: runtime.store.today,
-      uniqueVisitors: runtime.store.estimateToday(),
-    },
+    today,
     history: runtime.store.getHistoryDesc(runtime.config.historyDays),
     generatedAt: new Date().toISOString(),
   }
   return NextResponse.json(body, {
     headers: { 'cache-control': 'no-store' },
   })
+}
+
+/**
+ * The collector requests the raw sketch with `?format=raw`. Query-string
+ * only — middleware sometimes strips or rewrites the Accept header, and we
+ * want a single authoritative source.
+ */
+function isRawFormatRequested(req: NextRequest): boolean {
+  return req.nextUrl.searchParams.get('format') === 'raw'
 }
 
 /**
