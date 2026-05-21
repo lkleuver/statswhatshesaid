@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { dirname, isAbsolute, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 
 import {
@@ -103,7 +103,7 @@ function parseCliArgs(argv: string[]): ParsedArgs {
     let port = 7878
     if (values.port != null) {
       const parsed = Number(values.port)
-      if (!Number.isFinite(parsed) || parsed < 0 || parsed > 65535) {
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
         throw new Error(`invalid --port value: ${values.port}`)
       }
       port = parsed
@@ -308,7 +308,10 @@ async function resolveDbPath(configPath: string): Promise<string> {
   }
   if (!parsed.db) return defaultXdgDbPath()
   const expanded = expandTilde(parsed.db)
-  return resolve(expanded)
+  // Relative paths resolve against the config file's directory, matching
+  // `loadConfig`'s behaviour — keeps `swhsd.json` portable across machines.
+  if (isAbsolute(expanded)) return expanded
+  return resolve(dirname(configPath), expanded)
 }
 
 async function runServeCommand(parsed: ParsedArgs, io: IoStreams): Promise<number> {
