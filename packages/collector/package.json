@@ -1,6 +1,6 @@
 {
   "name": "statswhatshesaid-collector",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "External one-shot CLI that polls one or more statswhatshesaid instances and persists results to a local SQLite database.",
   "license": "MIT",
   "author": "Les Kleuver <les.kleuver@gmail.com>",
