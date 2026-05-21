@@ -1,0 +1,69 @@
+{
+  "name": "statswhatshesaid",
+  "version": "0.2.0",
+  "description": "A super minimal one-line drop-in unique-visitors-per-day stats library for Next.js. In-memory, zero dependencies, runs in both Edge and Node runtimes.",
+  "license": "MIT",
+  "author": "Les Kleuver <les.kleuver@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lkleuver/statswhatshesaid.git",
+    "directory": "packages/lib"
+  },
+  "bugs": {
+    "url": "https://github.com/lkleuver/statswhatshesaid/issues"
+  },
+  "homepage": "https://github.com/lkleuver/statswhatshesaid#readme",
+  "publishConfig": {
+    "provenance": true,
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm run typecheck && npm run test && npm run build",
+    "prepublishOnly": "npm run verify"
+  },
+  "keywords": [
+    "nextjs",
+    "stats",
+    "analytics",
+    "unique-visitors",
+    "self-hosted",
+    "hyperloglog",
+    "privacy",
+    "zero-dependencies"
+  ],
+  "peerDependencies": {
+    "next": ">=13.0.0"
+  },
+  "devDependencies": {
+    "@swhsd/hll": "*",
+    "@types/node": "^20.14.0",
+    "next": "^15.2.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.0"
+  }
+}

@@ -1,70 +1,25 @@
 {
-  "name": "statswhatshesaid",
-  "version": "0.2.0",
-  "description": "A super minimal one-line drop-in unique-visitors-per-day stats library for Next.js. In-memory, zero dependencies, runs in both Edge and Node runtimes.",
+  "name": "statswhatshesaid-monorepo",
+  "private": true,
+  "description": "Monorepo for the statswhatshesaid library and its companion collector CLI.",
   "license": "MIT",
-  "author": "Les Kleuver <les.kleuver@gmail.com>",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/lkleuver/statswhatshesaid.git",
-    "directory": "."
-  },
-  "bugs": {
-    "url": "https://github.com/lkleuver/statswhatshesaid/issues"
-  },
-  "homepage": "https://github.com/lkleuver/statswhatshesaid#readme",
-  "publishConfig": {
-    "provenance": true
-  },
+  "type": "module",
   "engines": {
     "node": ">=18.17.0"
   },
-  "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
-    }
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
+  "workspaces": [
+    "packages/*"
   ],
   "scripts": {
-    "build": "tsup",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "verify": "npm run typecheck && npm run test && npm run build",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "verify": "npm run verify --workspaces --if-present",
     "changeset": "changeset",
     "version": "changeset version",
-    "release": "npm run verify && changeset publish",
-    "prepublishOnly": "npm run verify"
-  },
-  "keywords": [
-    "nextjs",
-    "stats",
-    "analytics",
-    "unique-visitors",
-    "self-hosted",
-    "hyperloglog",
-    "privacy",
-    "zero-dependencies"
-  ],
-  "peerDependencies": {
-    "next": ">=13.0.0"
+    "release": "npm run verify && changeset publish"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.30.0",
-    "@types/node": "^20.14.0",
-    "next": "^15.2.0",
-    "tsup": "^8.3.0",
-    "typescript": "^5.5.0",
-    "vitest": "^2.1.0"
+    "@changesets/cli": "^2.30.0"
   }
 }
