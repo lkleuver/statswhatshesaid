@@ -1,10 +1,12 @@
 import { utcDateString } from './identity.js'
+import { PersistenceController } from './persistence.js'
 import { VisitorStore } from './store.js'
 import type { ResolvedConfig } from './types.js'
 
 export interface StatsRuntime {
   config: ResolvedConfig
   store: VisitorStore
+  persistence?: PersistenceController
 }
 
 declare global {
@@ -29,6 +31,12 @@ export function getOrInitRuntime(config: ResolvedConfig): StatsRuntime {
   store.trimHistory(config.maxHistoryDays)
 
   const runtime: StatsRuntime = { config, store }
+  if (config.persistence) {
+    runtime.persistence = new PersistenceController(
+      config.persistence,
+      config.persistSaveDebounceMs,
+    )
+  }
   globalThis.__statswhatshesaid__ = runtime
   return runtime
 }

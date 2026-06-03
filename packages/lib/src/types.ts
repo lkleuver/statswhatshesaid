@@ -38,6 +38,14 @@ export interface StatsOptions {
    * rotates daily.
    */
   saltSecret?: string
+  /**
+   * Opt-in persistence. Survives restarts/deploys on a SINGLE long-running
+   * instance by storing today's live sketch + history as an opaque blob.
+   * Both callbacks are required. Object-only — no env var equivalent.
+   */
+  persistence?: StatsPersistence
+  /** Min ms between debounced saves on the request path. Default 30000. */
+  persistSaveDebounceMs?: number
 }
 
 export interface ResolvedConfig {
@@ -49,11 +57,33 @@ export interface ResolvedConfig {
   trustProxy: number
   /** Resolved shared salt secret, or `null` if not configured. */
   saltSecret: string | null
+  persistence: StatsPersistence | null
+  persistSaveDebounceMs: number
 }
 
 export interface DailyCount {
   date: string
   uniqueVisitors: number
+}
+
+export interface StatsSnapshot {
+  version: 1
+  today: string
+  salt: string
+  registers: string
+  history: DailyCount[]
+}
+
+export interface StoreSnapshot {
+  today: string
+  salt: Uint8Array
+  registers: Uint8Array
+  history: DailyCount[]
+}
+
+export interface StatsPersistence {
+  load: () => Promise<StatsSnapshot | null>
+  save: (snapshot: StatsSnapshot) => Promise<void>
 }
 
 /**

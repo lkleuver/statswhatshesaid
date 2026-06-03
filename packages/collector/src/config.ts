@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 
 import type {
   RawAppConfig,
@@ -10,7 +10,7 @@ import type {
 } from './types.js'
 
 const DEFAULT_TIMEOUT_MS = 10_000
-const DEFAULT_USER_AGENT = 'swhsd-collect/0.1'
+const DEFAULT_USER_AGENT = 'statswhatshesaid-collector/0.1'
 const DEFAULT_DB_FILENAME = 'collector.db'
 const MIN_TOKEN_LENGTH_WARNING = 16
 
@@ -53,9 +53,14 @@ export function defaultXdgConfigPath(): string {
   return join(base, 'statswhatshesaid', 'config.json')
 }
 
-export function defaultXdgDbPath(): string {
-  const base = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share')
-  return join(base, 'statswhatshesaid', DEFAULT_DB_FILENAME)
+/**
+ * Default DB path: `collector.db` next to the config file. Keeps a single
+ * config-dir self-contained — copy/move the folder and the DB travels with
+ * it — and avoids the XDG data-dir split that surprised users who expected
+ * config and data to live together.
+ */
+export function defaultDbPath(configPath: string): string {
+  return join(dirname(configPath), DEFAULT_DB_FILENAME)
 }
 
 /** Expand a leading `~` to the user's home directory. */
@@ -95,7 +100,7 @@ export function normalizeConfig(raw: RawConfig, configPath: string): ResolvedCon
     )
   }
 
-  const dbPath = raw.db ? toAbsolutePath(expandTilde(raw.db), configPath) : defaultXdgDbPath()
+  const dbPath = raw.db ? toAbsolutePath(expandTilde(raw.db), configPath) : defaultDbPath(configPath)
 
   const defaultTimeout = raw.defaults?.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const defaultUserAgent = raw.defaults?.userAgent ?? DEFAULT_USER_AGENT
@@ -128,7 +133,7 @@ function normalizeApp(
   if (raw.token.length < MIN_TOKEN_LENGTH_WARNING) {
     // eslint-disable-next-line no-console
     console.warn(
-      `[swhsd-collect] Warning: token for app "${name}" is only ${raw.token.length} characters. ` +
+      `[statswhatshesaid-collector] Warning: token for app "${name}" is only ${raw.token.length} characters. ` +
         'Use a long random secret (e.g. `openssl rand -hex 32`) to avoid brute force.',
     )
   }

@@ -68,7 +68,7 @@ describe('runCli — meta commands', () => {
     const { io, stdout } = makeIo()
     const code = await runCli(['--help'], io)
     expect(code).toBe(0)
-    expect(stdout.text).toContain('swhsd-collect')
+    expect(stdout.text).toContain('statswhatshesaid-collector')
     expect(stdout.text).toContain('Usage:')
     expect(stdout.text).toContain('--config')
   })
@@ -98,7 +98,7 @@ describe('runCli — meta commands', () => {
     const { io, stderr } = makeIo()
     const code = await runCli(['--no-such-flag'], io)
     expect(code).toBe(1)
-    expect(stderr.text).toMatch(/swhsd-collect/)
+    expect(stderr.text).toMatch(/statswhatshesaid-collector/)
   })
 })
 

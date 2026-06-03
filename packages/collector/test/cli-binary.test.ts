@@ -56,7 +56,7 @@ describeIfBuilt('built dist/cli.js binary', () => {
   it('runs with --help and prints usage', async () => {
     const result = await runBinary(['--help'])
     expect(result.code).toBe(0)
-    expect(result.stdout).toContain('swhsd-collect')
+    expect(result.stdout).toContain('statswhatshesaid-collector')
     expect(result.stdout).toContain('--config')
   }, 15000)
 

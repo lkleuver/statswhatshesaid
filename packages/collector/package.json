@@ -24,7 +24,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "swhsd-collect": "dist/cli.js"
+    "statswhatshesaid-collector": "dist/cli.js"
   },
   "exports": {
     ".": {

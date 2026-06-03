@@ -31,7 +31,7 @@ npx statswhatshesaid-collector
 1. Create a config:
 
    ```bash
-   swhsd-collect init ./swhsd.json
+   statswhatshesaid-collector init ./swhsd.json
    ```
 
 2. Edit `swhsd.json` and fill in your app(s):
@@ -51,7 +51,7 @@ npx statswhatshesaid-collector
 3. Run it:
 
    ```bash
-   swhsd-collect
+   statswhatshesaid-collector
    ```
 
    You should see one line per app:
@@ -60,52 +60,52 @@ npx statswhatshesaid-collector
    OK app=blog today=412 historyRows=89
    ```
 
-4. Query the DB:
+4. Query the DB (created next to `swhsd.json` by default):
 
    ```bash
-   sqlite3 ~/.local/share/statswhatshesaid/collector.db \
+   sqlite3 ./collector.db \
      "SELECT app, date, unique_visitors FROM daily ORDER BY date DESC LIMIT 14;"
    ```
 
 ## Scheduling
 
-`swhsd-collect` is one-shot — schedule it like any other periodic job.
+`statswhatshesaid-collector` is one-shot — schedule it like any other periodic job.
 
 **cron** (every 15 minutes):
 
 ```cron
-*/15 * * * * /usr/local/bin/swhsd-collect --config /home/you/swhsd.json
+*/15 * * * * /usr/local/bin/statswhatshesaid-collector --config /home/you/swhsd.json
 ```
 
-**systemd timer** (`swhsd-collect.service` + `swhsd-collect.timer`):
+**systemd timer** (`statswhatshesaid-collector.service` + `statswhatshesaid-collector.timer`):
 
 ```ini
-# /etc/systemd/system/swhsd-collect.service
+# /etc/systemd/system/statswhatshesaid-collector.service
 [Unit]
 Description=statswhatshesaid collector
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/swhsd-collect --config /etc/swhsd.json
+ExecStart=/usr/local/bin/statswhatshesaid-collector --config /etc/swhsd.json
 
-# /etc/systemd/system/swhsd-collect.timer
+# /etc/systemd/system/statswhatshesaid-collector.timer
 [Unit]
-Description=Run swhsd-collect every 15 min
+Description=Run statswhatshesaid-collector every 15 min
 [Timer]
 OnUnitActiveSec=15min
 [Install]
 WantedBy=timers.target
 ```
 
-**launchd** (macOS, `~/Library/LaunchAgents/com.you.swhsd-collect.plist`):
+**launchd** (macOS, `~/Library/LaunchAgents/com.you.statswhatshesaid-collector.plist`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.you.swhsd-collect</string>
+  <key>Label</key><string>com.you.statswhatshesaid-collector</string>
   <key>ProgramArguments</key><array>
-    <string>/usr/local/bin/swhsd-collect</string>
+    <string>/usr/local/bin/statswhatshesaid-collector</string>
     <string>--config</string>
     <string>/Users/you/swhsd.json</string>
   </array>
@@ -131,11 +131,11 @@ jobs:
 
 ## Serve — local dashboard
 
-`swhsd-collect serve` boots a tiny read-only HTML dashboard against the same
+`statswhatshesaid-collector serve` boots a tiny read-only HTML dashboard against the same
 SQLite database the collector writes to.
 
 ```bash
-swhsd-collect serve --config ./swhsd.json
+statswhatshesaid-collector serve --config ./swhsd.json
 # Listening on http://127.0.0.1:7878
 ```
 
@@ -162,9 +162,9 @@ The page shows, per app: today's running count, time since last poll, a
 
 | Top-level | Type | Default | Notes |
 | --- | --- | --- | --- |
-| `db` | string | `~/.local/share/statswhatshesaid/collector.db` | SQLite file path, supports `~` |
+| `db` | string | `./collector.db` (next to the config file) | SQLite file path. Relative paths resolve against the config dir; `~` is expanded. |
 | `defaults.timeoutMs` | int | `10000` | Per-request timeout |
-| `defaults.userAgent` | string | `swhsd-collect/0.1` | Sent as `User-Agent` |
+| `defaults.userAgent` | string | `statswhatshesaid-collector/0.1` | Sent as `User-Agent` |
 | `apps` | object | **required** | Map of `{ name: appConfig }` |
 
 | Per-app | Type | Notes |
