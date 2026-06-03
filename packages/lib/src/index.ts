@@ -25,5 +25,11 @@ const defaultMiddleware = createMiddleware()
 
 export default defaultMiddleware
 export { createMiddleware, trackRequest }
-export type { StatsOptions, StatsResponseBody, DailyCount } from './types.js'
+export type {
+  StatsOptions,
+  StatsResponseBody,
+  DailyCount,
+  StatsPersistence,
+  StatsSnapshot,
+} from './types.js'
 export type { StatsMiddleware } from './middleware.js'

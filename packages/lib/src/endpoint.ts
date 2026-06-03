@@ -19,6 +19,8 @@ export async function handleStatsEndpoint(
     })
   }
 
+  if (runtime.persistence) await runtime.persistence.ensureHydrated(runtime)
+
   // Make sure "today" in the response always reflects the current UTC day,
   // even if no track() call has triggered a rollover yet.
   runtime.store.rollOverIfNeeded()

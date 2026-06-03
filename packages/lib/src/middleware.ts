@@ -66,6 +66,8 @@ async function trackRequestInternal(
   runtime: StatsRuntime,
 ): Promise<void> {
   try {
+    if (runtime.persistence) await runtime.persistence.ensureHydrated(runtime)
+
     const rawUa = req.headers.get('user-agent') ?? ''
     // Truncate BEFORE the bot filter so a 10 KB UA with "bot" on the far right
     // is still filtered — the regex only needs to see the prefix.
@@ -74,6 +76,7 @@ async function trackRequestInternal(
 
     const ip = extractIp(req.headers, runtime.config.trustProxy)
     await runtime.store.track(ip, ua)
+    runtime.persistence?.maybeSave(runtime)
   } catch (err) {
     // Never let a tracking failure take down the user's request.
     // eslint-disable-next-line no-console

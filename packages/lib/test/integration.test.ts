@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server'
 
 import { createMiddleware } from '../src/middleware.js'
 import { HLL_REGISTER_COUNT } from '@swhsd/hll'
+import type { StatsSnapshot, StatsPersistence } from '../src/types.js'
 
 /**
  * End-to-end integration tests exercising the full middleware → endpoint
@@ -246,5 +247,55 @@ describe('integration: User-Agent truncation', () => {
 describe('integration: HLL register count constant', () => {
   it('the HLL register count matches the documented 16384', () => {
     expect(HLL_REGISTER_COUNT).toBe(16384)
+  })
+})
+
+function memoryPersistence(): {
+  api: StatsPersistence
+  get: () => StatsSnapshot | null
+} {
+  let stored: StatsSnapshot | null = null
+  return {
+    api: {
+      load: async () => stored,
+      save: async (s) => {
+        stored = s
+      },
+    },
+    get: () => stored,
+  }
+}
+
+describe('integration: persistence survives a deploy', () => {
+  beforeEach(() => wipeSingleton())
+  afterEach(() => wipeSingleton())
+
+  it('restores today\'s count after a simulated restart', async () => {
+    const store = memoryPersistence()
+
+    // First process: three distinct visitors.
+    const mw1 = createMiddleware({
+      token: TOKEN,
+      persistence: store.api,
+      persistSaveDebounceMs: 0, // save on every request for the test
+    })
+    await mw1(req('/', { 'user-agent': 'FF', 'x-forwarded-for': '10.0.0.1' }))
+    await mw1(req('/', { 'user-agent': 'FF', 'x-forwarded-for': '10.0.0.2' }))
+    await mw1(req('/', { 'user-agent': 'Safari', 'x-forwarded-for': '10.0.0.3' }))
+
+    // Let the fire-and-forget save settle, then confirm something was stored.
+    await vi.waitFor(() => expect(store.get()).not.toBeNull())
+
+    // Simulate a deploy: wipe the in-memory singleton, new middleware instance.
+    wipeSingleton()
+    const mw2 = createMiddleware({
+      token: TOKEN,
+      persistence: store.api,
+      persistSaveDebounceMs: 0,
+    })
+
+    const res = await mw2(req(`/stats?t=${TOKEN}`))
+    const body = (await res.json()) as { today: { uniqueVisitors: number } }
+    expect(body.today.uniqueVisitors).toBe(3)
   })
 })
