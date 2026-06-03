@@ -84,6 +84,7 @@ const CTRL_TOKEN = 'persist-ctrl-secret-xxxxxxxxxxxxxxxxxxxxxxxxxx'
 // Drain the microtask queue so fire-and-forget saves settle. Works under
 // vi.useFakeTimers() because microtasks are not faked.
 async function flushMicrotasks(): Promise<void> {
+  // 5 turns drains the runSave chain (snapshot + save awaits + .finally).
   for (let i = 0; i < 5; i++) await Promise.resolve()
 }
 
@@ -116,7 +117,7 @@ function runtimeWith(persistence: ReturnType<typeof fakePersistence>['api'], deb
     persistence,
     persistSaveDebounceMs: debounceMs,
   })
-  return { config, store: VisitorStore.fresh('2026-06-03', null) }
+  return { config, store: VisitorStore.fresh(utcDateString(new Date()), null) }
 }
 
 describe('PersistenceController', () => {
