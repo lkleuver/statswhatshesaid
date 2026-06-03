@@ -82,7 +82,7 @@ path stay otherwise unchanged.
 {
   "version": 1,
   "today": "2026-06-03",
-  "salt": "<base64 of today's 16-byte salt>",
+  "salt": "<base64 of today's 32-byte salt>",
   "registers": "<base64 of the 16 KB HLL register array>",
   "history": [{ "date": "2026-06-02", "uniqueVisitors": 388 }, ...]
 }
