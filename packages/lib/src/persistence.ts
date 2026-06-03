@@ -3,8 +3,9 @@ import {
   decodeRegistersBase64,
 } from '@swhsd/hll'
 
-import { isValidUtcDate, SALT_BYTES } from './identity.js'
-import type { DailyCount, StatsSnapshot, StoreSnapshot } from './types.js'
+import { isValidUtcDate, utcDateString, SALT_BYTES } from './identity.js'
+import { VisitorStore } from './store.js'
+import type { DailyCount, ResolvedConfig, StatsSnapshot, StatsPersistence, StoreSnapshot } from './types.js'
 
 export type { StatsSnapshot, StatsPersistence } from './types.js'
 
@@ -98,4 +99,84 @@ function warnNull(reason: string): null {
     `[statswhatshesaid] ignoring persisted snapshot (${reason}); starting fresh.`,
   )
   return null
+}
+
+/**
+ * Minimal structural view of the runtime the controller needs. Declared
+ * locally (rather than imported from lifecycle.ts) to avoid an import cycle.
+ */
+interface RuntimeLike {
+  config: ResolvedConfig
+  store: VisitorStore
+}
+
+/**
+ * Owns opt-in persistence side effects: a one-time hydrate on first use and
+ * debounced, fire-and-forget saves on the request path. No timers, no signal
+ * handlers — the debounce clock is checked lazily via `Date.now()`.
+ */
+export class PersistenceController {
+  private readonly persistence: StatsPersistence
+  private readonly debounceMs: number
+  private hydration: Promise<void> | null = null
+  private lastSaveAt = 0
+  private lastSeenToday: string | null = null
+  private saving = false
+
+  constructor(persistence: StatsPersistence, debounceMs: number) {
+    this.persistence = persistence
+    this.debounceMs = debounceMs
+  }
+
+  /** Load + restore the store once. Memoized; safe under concurrent calls. */
+  ensureHydrated(runtime: RuntimeLike): Promise<void> {
+    if (!this.hydration) this.hydration = this.hydrate(runtime)
+    return this.hydration
+  }
+
+  private async hydrate(runtime: RuntimeLike): Promise<void> {
+    try {
+      const stored = await this.persistence.load()
+      if (!stored) return
+      const raw = deserializeSnapshot(stored)
+      if (!raw) return
+      const today = utcDateString(new Date())
+      runtime.store = VisitorStore.fromSnapshot(raw, today, runtime.config.saltSecret)
+      runtime.store.trimHistory(runtime.config.maxHistoryDays)
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[statswhatshesaid] persist load failed; starting fresh:', err)
+    }
+  }
+
+  /**
+   * Fire a save if the debounce window has elapsed, or immediately when the
+   * store's day has changed since the last observed save. Never throws; never
+   * overlaps with an in-flight save.
+   */
+  maybeSave(runtime: RuntimeLike): void {
+    if (this.saving) return
+    const today = runtime.store.today
+    const rolled = this.lastSeenToday !== null && today !== this.lastSeenToday
+    this.lastSeenToday = today
+
+    const now = Date.now()
+    if (!rolled && now - this.lastSaveAt < this.debounceMs) return
+
+    this.lastSaveAt = now
+    this.saving = true
+    void this.runSave(runtime).finally(() => {
+      this.saving = false
+    })
+  }
+
+  private async runSave(runtime: RuntimeLike): Promise<void> {
+    try {
+      const raw = await runtime.store.snapshot()
+      await this.persistence.save(serializeSnapshot(raw))
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[statswhatshesaid] persist save failed:', err)
+    }
+  }
 }
