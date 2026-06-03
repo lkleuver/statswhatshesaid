@@ -111,6 +111,67 @@ If you need exact counts down to the last human, don't use this library — grad
 
 This is intentional. The library exists to give freshly launched apps an "is anybody home?" signal in 30 seconds with zero infrastructure. Persistence and replication are a different problem class — graduate when you need them.
 
+## Persistence (optional)
+
+By default there's no storage — counts reset on every deploy. If you run a
+**single long-running instance** (`next start` on a VPS / Fly / Railway /
+Docker) you can opt in to persistence so today's live count and history
+survive restarts. Provide two async callbacks; the library hands you an opaque
+JSON snapshot to store and read back. Your database driver stays in your app —
+the library remains zero-dependency.
+
+```ts
+// middleware.ts
+import { createMiddleware } from 'statswhatshesaid'
+import { pool } from './db' // your existing pg Pool
+
+export default createMiddleware({
+  persistence: {
+    load: async () => {
+      const { rows } = await pool.query(
+        'select snapshot from stats_snapshot where id = 1',
+      )
+      return rows[0]?.snapshot ?? null
+    },
+    save: async (snapshot) => {
+      await pool.query(
+        `insert into stats_snapshot (id, snapshot) values (1, $1)
+         on conflict (id) do update set snapshot = $1`,
+        [snapshot],
+      )
+    },
+  },
+})
+```
+
+One-time table:
+
+```sql
+create table stats_snapshot (id int primary key, snapshot jsonb not null);
+```
+
+**How it works.** On the first request the library calls `load()` once and
+restores the in-memory sketch — resuming today if the snapshot is from today,
+or finalizing it into history if a day has passed. After each tracked request
+it calls `save()` at most once per `persistSaveDebounceMs` (default 30000),
+plus immediately when the UTC day rolls over. Saves are fire-and-forget and
+never block or fail a request; a failing `load()` at boot just starts fresh.
+
+**Single instance only.** The snapshot is a single read-modify-write row. With
+multiple replicas they'd clobber each other — for multi-replica consolidation
+use shared-salt mode plus the [collector](../collector) instead.
+
+**Privacy note.** The snapshot includes today's HLL salt (already in process
+memory) so the sketch can resume correctly. It rotates daily and never links
+across days, but anyone who can read this row *and* your request logs could in
+principle rederive today's `(ip, ua)` hashes — the same trust surface as
+database access generally.
+
+| Option | Default |
+| --- | --- |
+| `persistence` | unset (no persistence) |
+| `persistSaveDebounceMs` | `30000` |
+
 ## Configuration
 
 Configure via env vars (preferred for `STATS_TOKEN`) or by passing options to `createMiddleware({...})`. Options override env.
@@ -124,6 +185,8 @@ Configure via env vars (preferred for `STATS_TOKEN`) or by passing options to `c
 | `filterBots` | — | `true` |
 | `trustProxy` | `STATS_TRUST_PROXY` | `1` (see [Security](#security) below) |
 | `saltSecret` | `STATS_SALT_SECRET` | unset (see [Multi-replica deployments](#multi-replica-deployments) below) |
+| `persistence` | — | unset |
+| `persistSaveDebounceMs` | — | `30000` |
 
 ## Multi-replica deployments
 
