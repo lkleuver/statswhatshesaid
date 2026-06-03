@@ -62,6 +62,13 @@ describe('snapshot serialize/deserialize', () => {
     ).toBeNull()
   })
 
+  it('returns null for a negative visitor count', () => {
+    const blob = serializeSnapshot(rawSnapshot()) as Record<string, unknown>
+    expect(
+      deserializeSnapshot({ ...blob, history: [{ date: '2026-06-02', uniqueVisitors: -1 }] }),
+    ).toBeNull()
+  })
+
   it('returns null for non-object input', () => {
     expect(deserializeSnapshot(null)).toBeNull()
     expect(deserializeSnapshot('nope')).toBeNull()

@@ -64,6 +64,7 @@ export function deserializeSnapshot(value: unknown): StoreSnapshot | null {
 
   let salt: Uint8Array
   let registers: Uint8Array
+  // Both decoders throw on corrupt or wrong-length input.
   try {
     salt = decodeBytesBase64(v.salt, SALT_BYTES)
     registers = decodeRegistersBase64(v.registers)
@@ -80,7 +81,8 @@ export function deserializeSnapshot(value: unknown): StoreSnapshot | null {
       typeof date !== 'string' ||
       !isValidUtcDate(date) ||
       typeof uniqueVisitors !== 'number' ||
-      !Number.isFinite(uniqueVisitors)
+      !Number.isInteger(uniqueVisitors) ||
+      uniqueVisitors < 0
     ) {
       return warnNull('invalid history entry')
     }
