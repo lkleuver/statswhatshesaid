@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
+import { estimateRegisters } from '@swhsd/hll'
+import type { StoreSnapshot } from '../src/types.js'
 
 import { VisitorStore } from '../src/store.js'
 
@@ -104,9 +106,6 @@ describe('VisitorStore', () => {
     }
   })
 })
-
-import { estimateRegisters } from '@swhsd/hll'
-import type { StoreSnapshot } from '../src/types.js'
 
 describe('VisitorStore snapshot/restore', () => {
   it('snapshot() captures today, 32-byte salt, 16 KB registers, and history', async () => {

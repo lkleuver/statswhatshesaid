@@ -115,17 +115,18 @@ export class VisitorStore {
 
   /** History (excluding today) in descending date order, capped at `limit`. */
   getHistoryDesc(limit: number): DailyCount[] {
-    const rows: DailyCount[] = []
-    for (const [date, count] of this._history) {
-      if (date === this._today) continue
-      rows.push({ date, uniqueVisitors: count })
-    }
+    const rows = this._historyRows()
     rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
     return rows.slice(0, limit)
   }
 
   /** All finalized history (excluding today), uncapped, insertion order. */
   historyEntries(): DailyCount[] {
+    return this._historyRows()
+  }
+
+  /** All finalized history rows (excluding today), insertion order. */
+  private _historyRows(): DailyCount[] {
     const rows: DailyCount[] = []
     for (const [date, count] of this._history) {
       if (date === this._today) continue
