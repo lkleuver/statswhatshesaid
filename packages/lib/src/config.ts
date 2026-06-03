@@ -4,6 +4,7 @@ const DEFAULT_ENDPOINT_PATH = '/stats'
 const DEFAULT_HISTORY_DAYS = 90
 const DEFAULT_MAX_HISTORY_DAYS = 365
 const DEFAULT_TRUST_PROXY = 1
+const DEFAULT_PERSIST_DEBOUNCE_MS = 30000
 const MIN_RECOMMENDED_TOKEN_LENGTH = 32
 const MIN_RECOMMENDED_SALT_SECRET_LENGTH = 32
 // Match a conservative subset of path-safe characters. No CR/LF, spaces,
@@ -79,6 +80,11 @@ export function resolveConfig(options: StatsOptions = {}): ResolvedConfig {
     )
   }
 
+  const persistence = validatePersistence(options.persistence)
+  const persistSaveDebounceMs =
+    options.persistSaveDebounceMs ?? DEFAULT_PERSIST_DEBOUNCE_MS
+  requireNonNegativeInt(persistSaveDebounceMs, 'persistSaveDebounceMs')
+
   return {
     token,
     endpointPath,
@@ -87,6 +93,8 @@ export function resolveConfig(options: StatsOptions = {}): ResolvedConfig {
     filterBots,
     trustProxy: rawTrustProxy,
     saltSecret,
+    persistence,
+    persistSaveDebounceMs,
   }
 }
 
@@ -112,5 +120,21 @@ function parseIntOr(
 
 function normalizePath(p: string): string {
   if (!p.startsWith('/')) return `/${p}`
+  return p
+}
+
+function validatePersistence(
+  p: StatsOptions['persistence'],
+): ResolvedConfig['persistence'] {
+  if (p == null) return null
+  if (
+    typeof p !== 'object' ||
+    typeof p.load !== 'function' ||
+    typeof p.save !== 'function'
+  ) {
+    throw new Error(
+      '[statswhatshesaid] persistence must be an object with `load` and `save` async functions.',
+    )
+  }
   return p
 }
