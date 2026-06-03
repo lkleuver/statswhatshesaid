@@ -104,3 +104,82 @@ describe('VisitorStore', () => {
     }
   })
 })
+
+import { estimateRegisters } from '@swhsd/hll'
+import type { StoreSnapshot } from '../src/types.js'
+
+describe('VisitorStore snapshot/restore', () => {
+  it('snapshot() captures today, 32-byte salt, 16 KB registers, and history', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-03T12:00:00Z'))
+    try {
+      const s = VisitorStore.fresh('2026-06-03')
+      await s.track('1.1.1.1', 'ua-a')
+      await s.track('2.2.2.2', 'ua-b')
+      const snap = await s.snapshot()
+      expect(snap.today).toBe('2026-06-03')
+      expect(snap.salt.length).toBe(32)
+      expect(snap.registers.length).toBe(16384)
+      expect(estimateRegisters(snap.registers)).toBe(2)
+      expect(snap.history).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('fromSnapshot() resumes the same day and dedupes returning visitors', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-03T12:00:00Z'))
+    try {
+      const s = VisitorStore.fresh('2026-06-03')
+      await s.track('1.1.1.1', 'ua-a')
+      await s.track('2.2.2.2', 'ua-b')
+      const snap = await s.snapshot()
+
+      const restored = VisitorStore.fromSnapshot(snap, '2026-06-03', null)
+      expect(restored.estimateToday()).toBe(2)
+      // Same visitor seen before the "restart" must NOT increment (proves the
+      // salt was restored, not regenerated).
+      await restored.track('1.1.1.1', 'ua-a')
+      expect(restored.estimateToday()).toBe(2)
+      // A genuinely new visitor does increment.
+      await restored.track('3.3.3.3', 'ua-c')
+      expect(restored.estimateToday()).toBe(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('fromSnapshot() finalizes a past day into history and starts today fresh', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-06-02T12:00:00Z'))
+    try {
+      const s = VisitorStore.fresh('2026-06-02')
+      await s.track('1.1.1.1', 'ua-a')
+      await s.track('2.2.2.2', 'ua-b')
+      const snap = await s.snapshot()
+
+      const restored = VisitorStore.fromSnapshot(snap, '2026-06-03', null)
+      expect(restored.today).toBe('2026-06-03')
+      expect(restored.estimateToday()).toBe(0)
+      expect(restored.getHistoryDesc(90)).toEqual([
+        { date: '2026-06-02', uniqueVisitors: 2 },
+      ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('fromSnapshot() seeds prior history alongside a same-day resume', () => {
+    const snap: StoreSnapshot = {
+      today: '2026-06-03',
+      salt: new Uint8Array(32),
+      registers: new Uint8Array(16384),
+      history: [{ date: '2026-06-01', uniqueVisitors: 11 }],
+    }
+    const restored = VisitorStore.fromSnapshot(snap, '2026-06-03', null)
+    expect(restored.getHistoryDesc(90)).toEqual([
+      { date: '2026-06-01', uniqueVisitors: 11 },
+    ])
+  })
+})

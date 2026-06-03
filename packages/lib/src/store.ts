@@ -5,8 +5,8 @@ import {
   generateSalt,
   utcDateString,
 } from './identity.js'
-import { HyperLogLog } from '@swhsd/hll'
-import type { DailyCount } from './types.js'
+import { HyperLogLog, estimateRegisters } from '@swhsd/hll'
+import type { DailyCount, StoreSnapshot } from './types.js'
 
 /**
  * Owns the in-memory live state that `/stats` reads from: today's HLL
@@ -122,6 +122,74 @@ export class VisitorStore {
     }
     rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
     return rows.slice(0, limit)
+  }
+
+  /** All finalized history (excluding today), uncapped, insertion order. */
+  historyEntries(): DailyCount[] {
+    const rows: DailyCount[] = []
+    for (const [date, count] of this._history) {
+      if (date === this._today) continue
+      rows.push({ date, uniqueVisitors: count })
+    }
+    return rows
+  }
+
+  /**
+   * Raw serializable snapshot of the live state: today's date, today's salt
+   * (derived if in shared-salt mode), a copy of today's HLL registers, and
+   * all finalized history. Used by the persistence controller.
+   */
+  async snapshot(): Promise<StoreSnapshot> {
+    this.rollOverIfNeeded()
+    const salt = await this.getOrDeriveSalt()
+    return {
+      today: this._today,
+      salt: new Uint8Array(salt),
+      registers: this._hll.cloneRegisters(),
+      history: this.historyEntries(),
+    }
+  }
+
+  /**
+   * Build a store from a previously-saved snapshot, relative to the current
+   * UTC day:
+   *  - snapshot is from today  → restore salt + registers + history (resume).
+   *  - snapshot is from a past day → finalize that day into history, start
+   *    today fresh.
+   *  - snapshot is from a future day (clock skew) → start today fresh, seed
+   *    history only.
+   */
+  static fromSnapshot(
+    raw: StoreSnapshot,
+    currentToday: string,
+    saltSecret: string | null,
+  ): VisitorStore {
+    const history = new Map<string, number>()
+    for (const { date, uniqueVisitors } of raw.history) {
+      if (date !== currentToday) history.set(date, uniqueVisitors)
+    }
+
+    if (raw.today === currentToday) {
+      return new VisitorStore({
+        today: currentToday,
+        salt: raw.salt,
+        saltSecret,
+        hll: new HyperLogLog(raw.registers),
+        history,
+      })
+    }
+
+    if (raw.today < currentToday) {
+      history.set(raw.today, estimateRegisters(raw.registers))
+    }
+
+    return new VisitorStore({
+      today: currentToday,
+      salt: saltSecret ? null : generateSalt(),
+      saltSecret,
+      hll: new HyperLogLog(),
+      history,
+    })
   }
 
   /**
