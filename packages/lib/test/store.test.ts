@@ -181,4 +181,22 @@ describe('VisitorStore snapshot/restore', () => {
       { date: '2026-06-01', uniqueVisitors: 11 },
     ])
   })
+
+  it('fromSnapshot() ignores future-dated registers and starts today fresh', () => {
+    const registers = new Uint8Array(16384)
+    registers[0] = 9
+    registers[50] = 12
+    const snap: StoreSnapshot = {
+      today: '2026-06-05',
+      salt: new Uint8Array(32),
+      registers,
+      history: [{ date: '2026-06-01', uniqueVisitors: 7 }],
+    }
+    const restored = VisitorStore.fromSnapshot(snap, '2026-06-03', null)
+    expect(restored.today).toBe('2026-06-03')
+    expect(restored.estimateToday()).toBe(0) // future registers NOT loaded
+    expect(restored.getHistoryDesc(90)).toEqual([
+      { date: '2026-06-01', uniqueVisitors: 7 },
+    ])
+  })
 })

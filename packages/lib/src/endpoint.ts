@@ -21,6 +21,9 @@ export async function handleStatsEndpoint(
 
   if (runtime.persistence) await runtime.persistence.ensureHydrated(runtime)
 
+  // Reads don't trigger a save (persistence is driven from the track path);
+  // a new-day rollover seen only via /stats is recovered from the previous
+  // snapshot on the next hydrate.
   // Make sure "today" in the response always reflects the current UTC day,
   // even if no track() call has triggered a rollover yet.
   runtime.store.rollOverIfNeeded()
