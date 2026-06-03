@@ -8,7 +8,7 @@ A super minimal **one-line** drop-in stats library for Next.js. One metric, one 
 - **Works anywhere.** Edge runtime, Node runtime, Vercel, self-hosted, Docker, scratch images. The library uses only Web APIs (`crypto.subtle`, `crypto.getRandomValues`, `globalThis.fetch`).
 - Read your stats by visiting `myapp.com/stats?t=<your-secret>` — JSON response.
 
-> **Designed for freshly launched apps.** Counts and history live in process memory. They survive across requests within a single worker but reset on every deploy / restart. That's the trade-off for "drop in and forget." Once your traffic warrants real analytics, graduate to Plausible / Umami / PostHog.
+> **Designed for freshly launched apps.** Counts and history live in process memory. They survive across requests within a single worker but reset on every deploy / restart — unless you opt into the [persistence callback](#persistence-optional). That's the trade-off for "drop in and forget." Once your traffic warrants real analytics, graduate to Plausible / Umami / PostHog.
 
 ## Install
 
@@ -103,13 +103,13 @@ If you need exact counts down to the last human, don't use this library — grad
 
 ## Storage
 
-**There is none.** Counts and history live in module-level memory inside whichever Next.js worker is running your middleware.
+**None by default.** Counts and history live in module-level memory inside whichever Next.js worker is running your middleware.
 
 - ✅ State **survives across requests** within a single worker / Edge isolate (which is what makes the counter actually count).
-- ❌ State is **lost on every deploy**, process restart, or worker recycle.
+- ❌ State is **lost on every deploy**, process restart, or worker recycle — unless you opt into [Persistence](#persistence-optional) below.
 - ❌ State is **per-instance**: if you're running multiple replicas behind a load balancer, each replica has its own counter and they don't sync. Run a single instance, or use a real analytics tool.
 
-This is intentional. The library exists to give freshly launched apps an "is anybody home?" signal in 30 seconds with zero infrastructure. Persistence and replication are a different problem class — graduate when you need them.
+This is intentional. The library exists to give freshly launched apps an "is anybody home?" signal in 30 seconds with zero infrastructure. If frequent deploys are costing you today's numbers on a single instance, the opt-in [persistence callback](#persistence-optional) plugs that gap; replication across replicas is a different problem class — graduate when you need it.
 
 ## Persistence (optional)
 
@@ -263,9 +263,9 @@ An attacker who can send arbitrary `(IP, User-Agent)` pairs can insert arbitrari
 ### 5. Privacy properties
 
 - **Cookieless.** The library never sets or reads cookies.
-- **No personal data persisted.** Hashes go into the HLL (which discards them) and are never written anywhere. No filesystem, no remote calls.
+- **No personal data persisted by default.** Hashes go into the HLL (which discards them) and are never written anywhere. If you enable [Persistence](#persistence-optional), the library hands your callback an opaque snapshot — today's salt plus the HLL registers (no recoverable `(ip, ua)` hashes) plus daily counts — to store; see that section's privacy note for the trade-off.
 - **Cross-day unlinkability.** The salt rotates at every UTC midnight. Yesterday's hash of `(ip, ua)` is unrelated to today's hash of the same tuple.
-- **No telemetry.** The library makes zero outbound network requests.
+- **No telemetry.** The library itself makes zero outbound network requests. (An opt-in persistence callback, if you add one, runs *your* code — e.g. a database write.)
 
 ### 6. User-Agent length cap
 
